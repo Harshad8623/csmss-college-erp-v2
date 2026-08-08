@@ -1,0 +1,50 @@
+services:
+  - type: web
+    name: csmss-college-erp
+    runtime: python
+    region: singapore
+    plan: starter
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "(flask db upgrade || true) && gunicorn -c gunicorn.conf.py run:app"
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: FLASK_DEBUG
+        value: "0"
+      - key: WEB_CONCURRENCY
+        value: "2"
+      - key: SITE_URL
+        value: https://csmss-college-erp.onrender.com  # Update if your Render URL changes
+      - key: SECRET_KEY
+        sync: false          # Set manually in Render Dashboard
+      - key: DATABASE_URL
+        sync: false          # Set manually in Render Dashboard
+      - key: MAIL_SERVER
+        value: smtp.gmail.com
+      - key: MAIL_PORT
+        value: "587"
+      - key: MAIL_USE_TLS
+        value: "True"
+      - key: MAIL_USERNAME
+        sync: false          # Set manually in Render Dashboard
+      - key: MAIL_PASSWORD
+        sync: false          # Set manually in Render Dashboard (use Gmail App Password)
+      - key: MAIL_DEFAULT_SENDER
+        sync: false          # Set manually in Render Dashboard
+      - key: BREVO_API_KEY
+        sync: false          # Optional: Brevo API key for email (preferred over SMTP on free tier)
+      - key: VAPID_PUBLIC_KEY
+        sync: false          # Set manually in Render Dashboard
+      - key: VAPID_PRIVATE_KEY_RAW
+        sync: false          # Set manually — raw base64url EC private key (from generate_vapid.py)
+      - key: VAPID_CLAIMS_EMAIL
+        sync: false          # Set manually in Render Dashboard
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false          # Set manually in Render Dashboard
+      - key: CLOUDINARY_API_KEY
+        sync: false          # Set manually in Render Dashboard
+      - key: CLOUDINARY_API_SECRET
+        sync: false          # Set manually in Render Dashboard
+    autoDeploy: true
+    healthCheckPath: /health  # Dedicated health endpoint — avoids rate-limiting on /auth/login
+

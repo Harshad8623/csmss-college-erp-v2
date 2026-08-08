@@ -1,0 +1,449 @@
+{% extends "base.html" %}
+{% block title %}Student Dashboard{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:16px;">
+  <div>
+    <h1 class="page-title">
+      <div class="title-icon">🧑‍🎓</div>
+      Student Dashboard
+    </h1>
+    <p class="page-subtitle">
+      Welcome back, <strong>{{ current_user.name }}</strong>
+      {% if student.class_ %} — {{ student.class_.name }} {% endif %}
+    </p>
+  </div>
+  
+  {% if cr_users %}
+  <div style="background:var(--card-bg); padding:12px 16px; border-radius:12px; border:1px solid var(--border-color); display:flex; align-items:center; gap:12px; box-shadow:0 2px 8px rgba(0,0,0,0.05);">
+    <div style="background:rgba(255, 193, 7, 0.15); width:40px; height:40px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#ffc107; font-size:18px;">
+      <i class="fa-solid fa-crown"></i>
+    </div>
+    <div>
+      <div style="font-size:11px; color:var(--text-secondary); text-transform:uppercase; font-weight:700; letter-spacing:0.5px;">Class Representative</div>
+      <div style="font-weight:600; color:var(--text-primary); font-size:14px;">
+        {% for cr in cr_users %}
+          {{ cr.name }}{% if not loop.last %}, {% endif %}
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Alert if defaulter -->
+{% if stats.is_defaulter %}
+<div class="alert-erp alert-danger" style="margin-bottom:24px;">
+  <i class="fa-solid fa-triangle-exclamation"></i>
+  <div>
+    <strong>⚠️ Attendance Alert!</strong> Your overall attendance is
+    <strong>{{ stats.overall_attendance | round(1) }}%</strong> — below the required 75%.
+    Please attend more classes to avoid academic consequences.
+  </div>
+</div>
+{% endif %}
+
+<!-- Absentee Reason Requests -->
+{% if pending_reasons %}
+<div class="alert-erp alert-warning" style="margin-bottom:24px; display:block;">
+  <div style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
+    <i class="fa-solid fa-bell"></i>
+    <strong>Action Required: Provide Reason for Absence</strong>
+  </div>
+  {% for reason in pending_reasons %}
+  <div style="background: rgba(0,0,0,0.1); padding: 12px; border-radius: 6px; margin-bottom: 8px;">
+    <p style="margin-bottom: 8px; font-size: 13px;">
+      Your Teacher Guardian requested a reason for your absence on 
+      <strong>{{ reason.attendance.date.strftime('%d %b %Y') }}</strong> 
+      ({{ reason.attendance.subject.name if reason.attendance.subject else 'All Classes' }}).
+    </p>
+    <form action="{{ url_for('dashboard.submit_absentee_reason', reason_id=reason.id) }}" method="POST" style="display:flex;gap:8px;flex-wrap:wrap;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="text" name="reason_text" class="form-control-erp" placeholder="Type your reason here..." required style="flex:1;">
+      <button type="submit" class="btn-erp btn-warning-erp" style="padding: 8px 16px;">Submit</button>
+    </form>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<!-- Stats -->
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:16px;margin-bottom:28px;">
+  <div class="stat-card {{ 'stat-card-red' if stats.is_defaulter else 'stat-card-green' }}">
+    <div class="stat-icon {{ 'stat-icon-red' if stats.is_defaulter else 'stat-icon-green' }}">
+      <i class="fa-solid fa-clipboard-check"></i>
+    </div>
+    <div class="stat-content">
+      <div class="stat-value">{{ stats.overall_attendance | round(1) }}%</div>
+      <div class="stat-label">Overall Attendance</div>
+      <div class="stat-change {{ 'down' if stats.is_defaulter else 'up' }}">
+        <i class="fa-solid {{ 'fa-arrow-down' if stats.is_defaulter else 'fa-arrow-up' }}"></i>
+        {{ 'Below 75% — Defaulter' if stats.is_defaulter else 'Safe Zone ✅' }}
+      </div>
+    </div>
+  </div>
+
+  <div class="stat-card stat-card-blue">
+    <div class="stat-icon stat-icon-blue"><i class="fa-solid fa-star"></i></div>
+    <div class="stat-content">
+      <div class="stat-value">{{ marks_data|length }}</div>
+      <div class="stat-label">Marks Recorded</div>
+    </div>
+  </div>
+
+  <div class="stat-card stat-card-gold">
+    <div class="stat-icon stat-icon-gold"><i class="fa-solid fa-triangle-exclamation"></i></div>
+    <div class="stat-content">
+      <div class="stat-value">{{ stats.total_grievances }}</div>
+      <div class="stat-label">Grievances Filed</div>
+    </div>
+  </div>
+
+  <div class="stat-card stat-card-purple">
+    <div class="stat-icon stat-icon-purple"><i class="fa-solid fa-scroll"></i></div>
+    <div class="stat-content">
+      <div class="stat-value">{{ stats.pending_certs }}</div>
+      <div class="stat-label">Pending Certificates</div>
+    </div>
+  </div>
+</div>
+
+<!-- Class Ranks -->
+<div style="margin-bottom:28px;">
+  <h5 style="margin-bottom:16px; font-weight:600; color:var(--text-primary); display:flex; align-items:center; gap:8px;">
+    <i class="fa-solid fa-trophy" style="color:var(--accent-gold);"></i> My Class Rank <span style="font-size:12px; font-weight:normal; color:var(--text-secondary);">(Out of {{ total_class_students }} Students)</span>
+  </h5>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:16px;">
+    
+    <div class="stat-card" style="border-top: 3px solid var(--accent-blue);">
+      <div class="stat-content">
+        <div class="stat-label">Attendance Rank</div>
+        <div class="stat-value" style="font-size:24px;">{{ attendance_rank if attendance_rank else '-' }} <span style="font-size:14px; color:var(--text-secondary); font-weight:normal;">/ {{ total_class_students }}</span></div>
+      </div>
+    </div>
+
+    <div class="stat-card" style="border-top: 3px solid var(--accent-green);">
+      <div class="stat-content">
+        <div class="stat-label">CT-1 Rank</div>
+        <div class="stat-value" style="font-size:24px;">{{ marks_ranks[ExamType.CT1] if marks_ranks.get(ExamType.CT1) else '-' }} <span style="font-size:14px; color:var(--text-secondary); font-weight:normal;">/ {{ total_class_students }}</span></div>
+      </div>
+    </div>
+
+    <div class="stat-card" style="border-top: 3px solid var(--accent-purple);">
+      <div class="stat-content">
+        <div class="stat-label">CT-2 Rank</div>
+        <div class="stat-value" style="font-size:24px;">{{ marks_ranks[ExamType.CT2] if marks_ranks.get(ExamType.CT2) else '-' }} <span style="font-size:14px; color:var(--text-secondary); font-weight:normal;">/ {{ total_class_students }}</span></div>
+      </div>
+    </div>
+
+    <div class="stat-card" style="border-top: 3px solid var(--accent-red);">
+      <div class="stat-content">
+        <div class="stat-label">MSE Rank</div>
+        <div class="stat-value" style="font-size:24px;">{{ marks_ranks[ExamType.MSE] if marks_ranks.get(ExamType.MSE) else '-' }} <span style="font-size:14px; color:var(--text-secondary); font-weight:normal;">/ {{ total_class_students }}</span></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div class="grid-2col" style="margin-bottom:20px;">
+
+  <!-- Attendance by Subject -->
+  <div class="card-erp">
+    <div class="card-header-erp">
+      <h5><i class="fa-solid fa-clipboard-list" style="color:var(--accent-blue);"></i> Subject-wise Attendance</h5>
+      <a href="{{ url_for('attendance.index') }}" style="font-size:12px;color:var(--accent-blue);text-decoration:none;">Details →</a>
+    </div>
+    <div class="card-body-erp" style="padding:0;">
+      {% if attendance_data %}
+      <div style="padding:16px;display:flex;flex-direction:column;gap:14px;">
+        {% for item in attendance_data %}
+        <div>
+          <div style="display:flex;justify-content:space-between;margin-bottom:6px;font-size:13px;">
+            <span style="font-weight:500;">{{ item.subject.name }}</span>
+            <span style="font-weight:700;color:{{ 'var(--accent-red)' if item.percentage < 75 else 'var(--accent-green)' }};">
+              {{ item.percentage | round(1) }}%
+            </span>
+          </div>
+          <div class="progress-erp">
+            <div class="progress-bar-erp {{ 'red' if item.percentage < 75 else 'green' }}"
+              style="width:{{ item.percentage }}%;"></div>
+          </div>
+          {% if item.percentage < 75 %}
+          <div style="font-size:11px;color:var(--accent-red);margin-top:4px;">
+            ⚠️ Below 75% threshold
+          </div>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="empty-state"><div class="empty-icon">📋</div><p>No attendance data yet</p></div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Recent Marks -->
+  <div class="card-erp">
+    <div class="card-header-erp">
+      <h5><i class="fa-solid fa-star" style="color:var(--accent-yellow);"></i> Recent Marks</h5>
+      <a href="{{ url_for('marks.index') }}" style="font-size:12px;color:var(--accent-blue);text-decoration:none;">View All →</a>
+    </div>
+    <div class="card-body-erp" style="padding:0;">
+      {% if marks_data %}
+      <div class="table-wrap-scroll">
+      <table class="table-erp">
+        <thead><tr><th>Subject</th><th>Type</th><th>Marks</th><th>Grade</th></tr></thead>
+        <tbody>
+          {% for m in marks_data %}
+          <tr>
+            <td style="font-size:13px;font-weight:500;">{{ m.subject.name }}</td>
+            <td><span class="badge-erp badge-info">{{ m.exam_type.title() }}</span></td>
+            <td style="font-weight:700;">{{ m.marks }}/{{ m.max_marks|int }}</td>
+            <td>
+              <div class="grade-pill grade-{{ m.grade.replace('+','p') }}">{{ m.grade }}</div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+      {% else %}
+      <div class="empty-state"><div class="empty-icon">📊</div><p>No marks uploaded yet</p></div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- Class Leaderboards -->
+<h5 style="margin-bottom:16px; font-weight:600; color:var(--text-primary); display:flex; align-items:center; gap:8px;">
+  <i class="fa-solid fa-medal" style="color:var(--accent-gold);"></i> Top 5 Class Leaderboards
+</h5>
+<div class="grid-2col" style="margin-bottom:28px;">
+  
+  <!-- Attendance Leaderboard -->
+  <div class="card-erp">
+    <div class="card-header-erp" style="background: linear-gradient(to right, rgba(var(--accent-blue-rgb), 0.1), transparent);">
+      <h5><i class="fa-solid fa-clipboard-check" style="color:var(--accent-blue);"></i> Attendance Top 5</h5>
+    </div>
+    <div class="card-body-erp" style="padding:0;">
+      {% if attendance_leaderboard %}
+      <div class="table-wrap-scroll">
+      <table class="table-erp">
+        <thead><tr><th>Rank</th><th>Student</th><th>Percentage</th></tr></thead>
+        <tbody>
+          {% for item in attendance_leaderboard %}
+          <tr style="{{ 'background: rgba(var(--accent-gold-rgb), 0.05);' if loop.index <= 3 else '' }} {{ 'background: rgba(var(--accent-blue-rgb), 0.1); font-weight: bold;' if item.student.id == student.id else '' }}">
+            <td style="font-weight:700;">
+              {% if loop.index == 1 %}🥇 1st
+              {% elif loop.index == 2 %}🥈 2nd
+              {% elif loop.index == 3 %}🥉 3rd
+              {% else %}#{{ loop.index }}
+              {% endif %}
+            </td>
+            <td style="font-size:13px;font-weight:500;">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <img src="{{ url_for('static', filename='uploads/profiles/' + item.student.user.profile_pic) }}" onerror="this.src='{{ url_for('static', filename='img/default.png') }}'" style="width:24px; height:24px; border-radius:50%; object-fit:cover;">
+                {{ item.student.user.name }}
+                {% if item.student.id == student.id %} <span class="badge-erp badge-info" style="font-size:9px; padding:2px 4px;">You</span> {% endif %}
+              </div>
+            </td>
+            <td style="font-weight:700; color:var(--accent-green);">{{ item.percentage | round(1) }}%</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+      {% else %}
+      <div class="empty-state"><div class="empty-icon">📊</div><p>No data available</p></div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- MSE Leaderboard -->
+  <div class="card-erp">
+    <div class="card-header-erp" style="background: linear-gradient(to right, rgba(var(--accent-red-rgb), 0.1), transparent);">
+      <h5><i class="fa-solid fa-graduation-cap" style="color:var(--accent-red);"></i> MSE Top 5</h5>
+    </div>
+    <div class="card-body-erp" style="padding:0;">
+      {% if marks_leaderboards.get(ExamType.MSE) %}
+      <div class="table-wrap-scroll">
+      <table class="table-erp">
+        <thead><tr><th>Rank</th><th>Student</th><th>Score</th></tr></thead>
+        <tbody>
+          {% for item in marks_leaderboards[ExamType.MSE] %}
+          <tr style="{{ 'background: rgba(var(--accent-gold-rgb), 0.05);' if loop.index <= 3 else '' }} {{ 'background: rgba(var(--accent-blue-rgb), 0.1); font-weight: bold;' if item.student.id == student.id else '' }}">
+            <td style="font-weight:700;">
+              {% if loop.index == 1 %}🥇 1st
+              {% elif loop.index == 2 %}🥈 2nd
+              {% elif loop.index == 3 %}🥉 3rd
+              {% else %}#{{ loop.index }}
+              {% endif %}
+            </td>
+            <td style="font-size:13px;font-weight:500;">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <img src="{{ url_for('static', filename='uploads/profiles/' + item.student.user.profile_pic) }}" onerror="this.src='{{ url_for('static', filename='img/default.png') }}'" style="width:24px; height:24px; border-radius:50%; object-fit:cover;">
+                {{ item.student.user.name }}
+                {% if item.student.id == student.id %} <span class="badge-erp badge-info" style="font-size:9px; padding:2px 4px;">You</span> {% endif %}
+              </div>
+            </td>
+            <td style="font-weight:700; color:var(--accent-red);">{{ item.percentage | round(1) }}%</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+      {% else %}
+      <div class="empty-state"><div class="empty-icon">📊</div><p>No MSE marks yet</p></div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- CT1 Leaderboard -->
+  <div class="card-erp">
+    <div class="card-header-erp" style="background: linear-gradient(to right, rgba(var(--accent-green-rgb), 0.1), transparent);">
+      <h5><i class="fa-solid fa-file-pen" style="color:var(--accent-green);"></i> CT-1 Top 5</h5>
+    </div>
+    <div class="card-body-erp" style="padding:0;">
+      {% if marks_leaderboards.get(ExamType.CT1) %}
+      <div class="table-wrap-scroll">
+      <table class="table-erp">
+        <thead><tr><th>Rank</th><th>Student</th><th>Score</th></tr></thead>
+        <tbody>
+          {% for item in marks_leaderboards[ExamType.CT1] %}
+          <tr style="{{ 'background: rgba(var(--accent-gold-rgb), 0.05);' if loop.index <= 3 else '' }} {{ 'background: rgba(var(--accent-blue-rgb), 0.1); font-weight: bold;' if item.student.id == student.id else '' }}">
+            <td style="font-weight:700;">
+              {% if loop.index == 1 %}🥇 1st
+              {% elif loop.index == 2 %}🥈 2nd
+              {% elif loop.index == 3 %}🥉 3rd
+              {% else %}#{{ loop.index }}
+              {% endif %}
+            </td>
+            <td style="font-size:13px;font-weight:500;">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <img src="{{ url_for('static', filename='uploads/profiles/' + item.student.user.profile_pic) }}" onerror="this.src='{{ url_for('static', filename='img/default.png') }}'" style="width:24px; height:24px; border-radius:50%; object-fit:cover;">
+                {{ item.student.user.name }}
+                {% if item.student.id == student.id %} <span class="badge-erp badge-info" style="font-size:9px; padding:2px 4px;">You</span> {% endif %}
+              </div>
+            </td>
+            <td style="font-weight:700; color:var(--accent-green);">{{ item.percentage | round(1) }}%</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+      {% else %}
+      <div class="empty-state"><div class="empty-icon">📊</div><p>No CT-1 marks yet</p></div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- CT2 Leaderboard -->
+  <div class="card-erp">
+    <div class="card-header-erp" style="background: linear-gradient(to right, rgba(var(--accent-purple-rgb), 0.1), transparent);">
+      <h5><i class="fa-solid fa-file-pen" style="color:var(--accent-purple);"></i> CT-2 Top 5</h5>
+    </div>
+    <div class="card-body-erp" style="padding:0;">
+      {% if marks_leaderboards.get(ExamType.CT2) %}
+      <div class="table-wrap-scroll">
+      <table class="table-erp">
+        <thead><tr><th>Rank</th><th>Student</th><th>Score</th></tr></thead>
+        <tbody>
+          {% for item in marks_leaderboards[ExamType.CT2] %}
+          <tr style="{{ 'background: rgba(var(--accent-gold-rgb), 0.05);' if loop.index <= 3 else '' }} {{ 'background: rgba(var(--accent-blue-rgb), 0.1); font-weight: bold;' if item.student.id == student.id else '' }}">
+            <td style="font-weight:700;">
+              {% if loop.index == 1 %}🥇 1st
+              {% elif loop.index == 2 %}🥈 2nd
+              {% elif loop.index == 3 %}🥉 3rd
+              {% else %}#{{ loop.index }}
+              {% endif %}
+            </td>
+            <td style="font-size:13px;font-weight:500;">
+              <div style="display:flex; align-items:center; gap:8px;">
+                <img src="{{ url_for('static', filename='uploads/profiles/' + item.student.user.profile_pic) }}" onerror="this.src='{{ url_for('static', filename='img/default.png') }}'" style="width:24px; height:24px; border-radius:50%; object-fit:cover;">
+                {{ item.student.user.name }}
+                {% if item.student.id == student.id %} <span class="badge-erp badge-info" style="font-size:9px; padding:2px 4px;">You</span> {% endif %}
+              </div>
+            </td>
+            <td style="font-weight:700; color:var(--accent-purple);">{{ item.percentage | round(1) }}%</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+      {% else %}
+      <div class="empty-state"><div class="empty-icon">📊</div><p>No CT-2 marks yet</p></div>
+      {% endif %}
+    </div>
+  </div>
+
+</div>
+
+<div class="grid-2col">
+  <!-- Recent Notices -->
+  <div class="card-erp">
+    <div class="card-header-erp">
+      <h5><i class="fa-solid fa-bullhorn" style="color:var(--accent-purple);"></i> Latest Notices</h5>
+      <a href="{{ url_for('notices.index') }}" style="font-size:12px;color:var(--accent-blue);text-decoration:none;">All →</a>
+    </div>
+    <div class="card-body-erp">
+      {% if notices %}
+      <div class="timeline">
+        {% for notice in notices %}
+        <div class="timeline-item">
+          <div class="timeline-dot" style="{{ 'background:var(--accent-red)' if notice.is_urgent else '' }}"></div>
+          <div class="timeline-content">
+            <div class="timeline-title">
+              {{ '🚨 ' if notice.is_urgent else '📢 ' }}{{ notice.title }}
+            </div>
+            <div class="timeline-time">{{ notice.created_at.strftime('%d %b %Y') }}</div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="empty-state"><div class="empty-icon">📢</div><p>No notices</p></div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Quick Actions -->
+  <div class="card-erp">
+    <div class="card-header-erp">
+      <h5><i class="fa-solid fa-bolt" style="color:var(--accent-yellow);"></i> Quick Actions</h5>
+    </div>
+    <div class="card-body-erp">
+      <div class="quick-actions">
+        <a href="{{ url_for('attendance.index') }}" class="quick-action">
+          <div class="qa-icon">📋</div><div class="qa-label">Attendance</div>
+        </a>
+        <a href="{{ url_for('marks.index') }}" class="quick-action">
+          <div class="qa-icon">⭐</div><div class="qa-label">My Marks</div>
+        </a>
+        <a href="{{ url_for('grievance.create') }}" class="quick-action">
+          <div class="qa-icon">⚠️</div><div class="qa-label">Grievance</div>
+        </a>
+        <a href="{{ url_for('certificate.apply') }}" class="quick-action">
+          <div class="qa-icon">📜</div><div class="qa-label">Certificate</div>
+        </a>
+        <a href="{{ url_for('assignments.index') }}" class="quick-action">
+          <div class="qa-icon">📝</div><div class="qa-label">Assignments</div>
+        </a>
+        <a href="{{ url_for('timetable.index') }}" class="quick-action">
+          <div class="qa-icon">📅</div><div class="qa-label">Timetable</div>
+        </a>
+        <a href="{{ url_for('notices.index') }}" class="quick-action">
+          <div class="qa-icon">📢</div><div class="qa-label">Notices</div>
+        </a>
+        <a href="{{ url_for('auth.profile') }}" class="quick-action">
+          <div class="qa-icon">👤</div><div class="qa-label">Profile</div>
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<style>@media(max-width:768px){div[style*="grid-template-columns:1fr 1fr"]{grid-template-columns:1fr!important}}</style>
+{% endblock %}

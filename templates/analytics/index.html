@@ -1,0 +1,339 @@
+{% extends "base.html" %}
+{% block title %}Analytics{% endblock %}
+{% block extra_css %}
+<style>
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:14px;margin-bottom:24px}
+.kpi-card{background:var(--card-bg);border:1px solid var(--border-color);border-radius:12px;padding:18px 14px;text-align:center;transition:.2s}
+.kpi-card:hover{transform:translateY(-3px);border-color:var(--accent-blue)}
+.kpi-val{font-size:2rem;font-weight:800;background:linear-gradient(135deg,#6366f1,#8b5cf6);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.kpi-val.green{background:linear-gradient(135deg,#10b981,#34d399);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.kpi-val.red{background:linear-gradient(135deg,#ef4444,#f97316);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.kpi-label{font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-top:4px}
+.charts-2{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:18px}
+.charts-1{display:grid;grid-template-columns:1fr;gap:18px;margin-bottom:18px}
+@media(max-width:768px){.charts-2{grid-template-columns:1fr}}
+.chart-card{background:var(--card-bg);border:1px solid var(--border-color);border-radius:14px;padding:18px}
+.chart-title{font-size:13px;font-weight:600;color:var(--text-secondary);margin-bottom:14px;display:flex;align-items:center;gap:8px}
+.chart-title i{color:var(--accent-purple)}
+canvas{max-height:240px}
+.select-ctrl{background:var(--input-bg);border:1px solid var(--border-color);border-radius:8px;color:var(--text-primary);padding:6px 10px;font-size:13px;margin-left:auto}
+.stbl{width:100%;border-collapse:collapse;font-size:12.5px}
+.stbl th{padding:8px 10px;background:var(--sidebar-bg);color:var(--text-muted);text-align:left;font-weight:600;text-transform:uppercase;font-size:11px}
+.stbl td{padding:8px 10px;border-bottom:1px solid var(--border-color);color:var(--text-secondary)}
+.stbl tr:hover td{background:rgba(99,102,241,.05)}
+.badge-pct{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600}
+.badge-ok{background:rgba(16,185,129,.15);color:#10b981}
+.badge-bad{background:rgba(239,68,68,.15);color:#ef4444}
+.section-title{font-size:18px;font-weight:700;color:var(--text-primary);margin:24px 0 14px;display:flex;align-items:center;gap:8px}
+</style>
+{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">
+    <div class="title-icon">📊</div>
+    Analytics &mdash;
+    {% if role == 'SUPER_ADMIN' %}Principal View
+    {% elif role == 'HOD' %}HOD View{% if hod_dept %} · {{ hod_dept.name }}{% endif %}
+    {% elif role == 'CLASS_TEACHER' %}Class Teacher View{% if ct_class %} · {{ ct_class.name }}{% endif %}
+    {% elif role == 'TEACHER' %}{% if is_tg %}TG + {% endif %}Subject View
+    {% endif %}
+  </h1>
+</div>
+
+{# ═══ PRINCIPAL ════════════════════════════════════════════════════════════ #}
+{% if role == 'SUPER_ADMIN' %}
+<div class="kpi-grid" id="kpiRow"></div>
+<div class="charts-2">
+  <div class="chart-card"><div class="chart-title"><i class="fa-solid fa-chart-bar"></i>Dept-wise Today <span style="margin-left:auto;font-size:11px;color:var(--text-muted)">Present vs Absent</span></div><canvas id="deptTodayChart"></canvas></div>
+  <div class="chart-card"><div class="chart-title"><i class="fa-solid fa-chart-line"></i>7-Day College Trend</div><canvas id="weekChart"></canvas></div>
+</div>
+<div class="charts-2">
+  <div class="chart-card"><div class="chart-title"><i class="fa-solid fa-building"></i>Dept Overall Attendance %</div><canvas id="deptOverallChart"></canvas></div>
+  <div class="chart-card"><div class="chart-title"><i class="fa-solid fa-chalkboard"></i>Class-wise Attendance %</div><canvas id="classwiseChart"></canvas></div>
+</div>
+<div class="charts-2">
+  <div class="chart-card"><div class="chart-title"><i class="fa-solid fa-triangle-exclamation"></i>Defaulters per Dept</div><canvas id="defaulterChart"></canvas></div>
+  <div class="chart-card">
+    <div class="chart-title"><i class="fa-solid fa-chalkboard-user"></i>Lecture-wise Today
+      <select class="select-ctrl" id="lectureClassPicker" onchange="loadLectureChart(this.value,'lectureChart','principal')">
+        <option value="">-- Select Class --</option>
+        {% for c in all_classes %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+      </select>
+    </div>
+    <canvas id="lectureChart"></canvas>
+  </div>
+</div>
+
+{% elif role == 'HOD' %}
+{# ═══ HOD ══════════════════════════════════════════════════════════════════ #}
+<div class="kpi-grid" id="kpiRow"></div>
+<div class="charts-2">
+  <div class="chart-card"><div class="chart-title"><i class="fa-solid fa-chart-bar"></i>Class-wise Today</div><canvas id="ctTodayChart"></canvas></div>
+  <div class="chart-card"><div class="chart-title"><i class="fa-solid fa-chart-line"></i>7-Day Dept Trend</div><canvas id="weekChart"></canvas></div>
+</div>
+<div class="charts-2">
+  <div class="chart-card"><div class="chart-title"><i class="fa-solid fa-book"></i>Subject Attendance %</div><canvas id="subjChart"></canvas></div>
+  <div class="chart-card"><div class="chart-title"><i class="fa-solid fa-triangle-exclamation"></i>Defaulters per Class</div><canvas id="defaulterChart"></canvas></div>
+</div>
+<div class="charts-1">
+  <div class="chart-card">
+    <div class="chart-title"><i class="fa-solid fa-chalkboard-user"></i>Lecture-wise Today
+      <select class="select-ctrl" id="lectureClassPicker" onchange="loadLectureChart(this.value,'lectureChart','hod')">
+        <option value="">-- Select Class --</option>
+        {% for c in dept_classes %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+      </select>
+    </div>
+    <canvas id="lectureChart"></canvas>
+  </div>
+</div>
+
+{% elif role == 'CLASS_TEACHER' %}
+{# ═══ CLASS TEACHER ════════════════════════════════════════════════════════ #}
+<div class="kpi-grid" id="kpiRow"></div>
+<div class="charts-2">
+  <div class="chart-card"><div class="chart-title"><i class="fa-solid fa-chart-line"></i>7-Day Class Trend</div><canvas id="weekChart"></canvas></div>
+  <div class="chart-card"><div class="chart-title"><i class="fa-solid fa-book"></i>Subject-wise Avg %</div><canvas id="subjChart"></canvas></div>
+</div>
+<div class="charts-2">
+  <div class="chart-card"><div class="chart-title"><i class="fa-solid fa-users"></i>Student Attendance %</div><canvas id="studentChart"></canvas></div>
+  <div class="chart-card"><div class="chart-title"><i class="fa-solid fa-chalkboard-user"></i>Lecture-wise Today</div><canvas id="lectureChart"></canvas></div>
+</div>
+<div class="chart-card" style="margin-bottom:18px">
+  <div class="chart-title"><i class="fa-solid fa-table"></i>Student Attendance Detail</div>
+  <div style="max-height:320px;overflow-y:auto"><table class="stbl" id="studentTable"><thead><tr><th>#</th><th>Student</th><th>Roll</th><th>Overall %</th><th>Status</th></tr></thead><tbody id="studentTbody"></tbody></table></div>
+</div>
+
+{% elif role == 'TEACHER' %}
+{# ═══ TEACHER (TG + SUBJECT) ═══════════════════════════════════════════════ #}
+{% if is_tg %}
+<div class="section-title"><i class="fa-solid fa-shield-heart"></i>TG Batch Analytics ({{ tg_count }} Students)</div>
+<div class="kpi-grid" id="tgKpiRow"></div>
+<div class="charts-2">
+  <div class="chart-card"><div class="chart-title"><i class="fa-solid fa-chart-bar"></i>Student Attendance %</div><canvas id="tgStudentChart"></canvas></div>
+  <div class="chart-card"><div class="chart-title"><i class="fa-solid fa-chart-line"></i>7-Day Batch Trend</div><canvas id="tgWeekChart"></canvas></div>
+</div>
+<div class="chart-card" style="margin-bottom:18px">
+  <div class="chart-title"><i class="fa-solid fa-table"></i>TG Batch Detail</div>
+  <div style="max-height:300px;overflow-y:auto"><table class="stbl"><thead><tr><th>#</th><th>Student</th><th>Roll</th><th>Overall %</th><th>Status</th></tr></thead><tbody id="tgTbody"></tbody></table></div>
+</div>
+{% endif %}
+
+{% if my_subjects %}
+<div class="section-title"><i class="fa-solid fa-book-open"></i>Subject Analytics</div>
+<div style="margin-bottom:16px">
+  <label style="color:var(--text-muted);font-size:12px;text-transform:uppercase;letter-spacing:.5px">Select Subject</label>
+  <select class="select-ctrl" style="margin-left:12px;display:inline-block" onchange="window.location='/analytics?subject_id='+this.value">
+    {% for s in my_subjects %}<option value="{{ s.id }}" {% if selected_subject_id == s.id %}selected{% endif %}>{{ s.name }}</option>{% endfor %}
+  </select>
+</div>
+{% if selected_subject_id %}
+<div class="kpi-grid" id="subjKpiRow"></div>
+<div class="charts-2">
+  <div class="chart-card"><div class="chart-title"><i class="fa-solid fa-chart-bar"></i>Student Attendance % in Subject</div><canvas id="subjStudentChart"></canvas></div>
+  <div class="chart-card"><div class="chart-title"><i class="fa-solid fa-chart-line"></i>30-Day Lecture Trend</div><canvas id="subjTrendChart"></canvas></div>
+</div>
+<div class="chart-card" style="margin-bottom:18px">
+  <div class="chart-title"><i class="fa-solid fa-triangle-exclamation" style="color:var(--accent-red)"></i>Defaulters (&lt;75%) in Subject</div>
+  <div style="max-height:300px;overflow-y:auto"><table class="stbl"><thead><tr><th>#</th><th>Student</th><th>Roll</th><th>% in Subject</th></tr></thead><tbody id="subjDefaulterTbody"></tbody></table></div>
+</div>
+{% endif %}
+{% endif %}
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+const ROLE = "{{ role }}";
+const C = {
+  blue:'rgba(99,102,241,.7)', green:'rgba(16,185,129,.7)', red:'rgba(239,68,68,.7)',
+  purple:'rgba(139,92,246,.7)', cyan:'rgba(6,182,212,.7)', orange:'rgba(245,158,11,.7)',
+  blueLine:'#6366f1', greenLine:'#10b981', redLine:'#ef4444'
+};
+const chartOpts = (stacked=false)=>({
+  responsive:true, maintainAspectRatio:true,
+  plugins:{legend:{labels:{color:'#94a3b8',font:{size:11}}},tooltip:{callbacks:{label:ctx=>`${ctx.dataset.label||''}: ${ctx.parsed.y??ctx.parsed}`}}},
+  scales:{x:{ticks:{color:'#64748b',font:{size:10}},grid:{color:'rgba(255,255,255,.05)'}},y:{ticks:{color:'#64748b',font:{size:10}},grid:{color:'rgba(255,255,255,.05)'},stacked:stacked}}
+});
+const donutOpts={responsive:true,maintainAspectRatio:true,plugins:{legend:{position:'bottom',labels:{color:'#94a3b8',font:{size:11}}}}};
+
+function mkBar(id,labels,datasets,stacked=false){
+  const ctx=document.getElementById(id); if(!ctx)return;
+  new Chart(ctx,{type:'bar',data:{labels,datasets},options:chartOpts(stacked)});
+}
+function mkLine(id,labels,datasets){
+  const ctx=document.getElementById(id); if(!ctx)return;
+  new Chart(ctx,{type:'line',data:{labels,datasets},options:chartOpts()});
+}
+function mkDoughnut(id,labels,data,colors){
+  const ctx=document.getElementById(id); if(!ctx)return;
+  new Chart(ctx,{type:'doughnut',data:{labels,datasets:[{data,backgroundColor:colors,borderWidth:2}]},options:donutOpts});
+}
+function colorPct(v){return v<75?C.red:C.green;}
+function kpiHtml(items){
+  return items.map(i=>`<div class="kpi-card"><div class="kpi-val ${i.cls||''}">${i.val}</div><div class="kpi-label">${i.label}</div></div>`).join('');
+}
+
+function loadLectureChart(classId, canvasId, scope){
+  if(!classId)return;
+  const ep = scope==='hod' ? `/analytics/api/hod/lecture-today?class_id=${classId}` : `/analytics/api/principal/lecture-today?class_id=${classId}`;
+  fetch(ep).then(r=>r.json()).then(d=>{
+    const ctx=document.getElementById(canvasId);
+    if(!ctx)return;
+    if(ctx._chartInst)ctx._chartInst.destroy();
+    ctx._chartInst=new Chart(ctx,{type:'bar',data:{labels:d.labels,datasets:[
+      {label:'Present',data:d.present,backgroundColor:C.green,borderRadius:6},
+      {label:'Absent',data:d.absent,backgroundColor:C.red,borderRadius:6}
+    ]},options:chartOpts(true)});
+  });
+}
+
+// ── PRINCIPAL ─────────────────────────────────────────────────────────────
+if(ROLE==='SUPER_ADMIN'){
+  fetch('/analytics/api/principal/summary').then(r=>r.json()).then(d=>{
+    document.getElementById('kpiRow').innerHTML=kpiHtml([
+      {val:d.students,label:'Total Students',cls:''},
+      {val:d.teachers,label:'Total Teachers',cls:''},
+      {val:d.depts,label:'Departments',cls:''},
+      {val:d.present_today,label:'Present Today',cls:'green'},
+      {val:d.absent_today,label:'Absent Today',cls:'red'},
+      {val:d.defaulters,label:'Defaulters (<75%)',cls:'red'},
+    ]);
+  });
+  fetch('/analytics/api/principal/dept-today').then(r=>r.json()).then(d=>{
+    mkBar('deptTodayChart',d.labels,[
+      {label:'Present',data:d.present,backgroundColor:C.green,borderRadius:4},
+      {label:'Absent',data:d.absent,backgroundColor:C.red,borderRadius:4}
+    ],true);
+  });
+  fetch('/analytics/api/principal/weekwise').then(r=>r.json()).then(d=>{
+    mkLine('weekChart',d.labels,[
+      {label:'Present',data:d.present,borderColor:C.greenLine,backgroundColor:'rgba(16,185,129,.1)',fill:true,tension:.4,pointRadius:3},
+      {label:'Absent',data:d.absent,borderColor:C.redLine,backgroundColor:'transparent',fill:false,tension:.4,pointRadius:3}
+    ]);
+  });
+  fetch('/analytics/api/principal/dept-overall').then(r=>r.json()).then(d=>{
+    mkBar('deptOverallChart',d.labels,[{label:'Avg %',data:d.data,backgroundColor:d.data.map(v=>colorPct(v)),borderRadius:6}]);
+  });
+  fetch('/analytics/api/principal/classwise').then(r=>r.json()).then(d=>{
+    mkBar('classwiseChart',d.labels,[{label:'Attendance %',data:d.data,backgroundColor:d.data.map(v=>colorPct(v)),borderRadius:6}]);
+  });
+  fetch('/analytics/api/principal/defaulters-dept').then(r=>r.json()).then(d=>{
+    mkBar('defaulterChart',d.labels,[
+      {label:'Safe',data:d.safe,backgroundColor:C.green,borderRadius:4},
+      {label:'Defaulters',data:d.defaulters,backgroundColor:C.red,borderRadius:4}
+    ],true);
+  });
+}
+
+// ── HOD ───────────────────────────────────────────────────────────────────
+if(ROLE==='HOD'){
+  fetch('/analytics/api/hod/summary').then(r=>r.json()).then(d=>{
+    document.getElementById('kpiRow').innerHTML=kpiHtml([
+      {val:d.total,label:'Dept Students'},
+      {val:d.present,label:'Present Today',cls:'green'},
+      {val:d.absent,label:'Absent Today',cls:'red'},
+      {val:d.defaulters,label:'Defaulters',cls:'red'},
+      {val:d.avg_pct+'%',label:'Overall Avg'}
+    ]);
+  });
+  fetch('/analytics/api/hod/classwise-today').then(r=>r.json()).then(d=>{
+    mkBar('ctTodayChart',d.labels,[
+      {label:'Present',data:d.present,backgroundColor:C.green,borderRadius:4},
+      {label:'Absent',data:d.absent,backgroundColor:C.red,borderRadius:4}
+    ],true);
+  });
+  fetch('/analytics/api/hod/weekwise').then(r=>r.json()).then(d=>{
+    mkLine('weekChart',d.labels,[
+      {label:'Present',data:d.present,borderColor:C.greenLine,backgroundColor:'rgba(16,185,129,.1)',fill:true,tension:.4,pointRadius:3},
+      {label:'Absent',data:d.absent,borderColor:C.redLine,fill:false,tension:.4,pointRadius:3}
+    ]);
+  });
+  fetch('/analytics/api/hod/subject-attendance').then(r=>r.json()).then(d=>{
+    mkBar('subjChart',d.labels,[{label:'Avg %',data:d.data,backgroundColor:d.data.map(v=>colorPct(v)),borderRadius:6}]);
+  });
+  fetch('/analytics/api/hod/defaulters').then(r=>r.json()).then(d=>{
+    mkBar('defaulterChart',d.labels,[{label:'Defaulters',data:d.data,backgroundColor:C.red,borderRadius:6}]);
+  });
+}
+
+// ── CLASS TEACHER ─────────────────────────────────────────────────────────
+if(ROLE==='CLASS_TEACHER'){
+  fetch('/analytics/api/ct/summary').then(r=>r.json()).then(d=>{
+    document.getElementById('kpiRow').innerHTML=kpiHtml([
+      {val:d.total,label:'Class Size'},
+      {val:d.present,label:'Present Today',cls:'green'},
+      {val:d.absent,label:'Absent Today',cls:'red'},
+      {val:d.avg_pct+'%',label:'Overall Avg'},
+      {val:d.defaulters,label:'Defaulters',cls:'red'}
+    ]);
+  });
+  fetch('/analytics/api/ct/weekwise').then(r=>r.json()).then(d=>{
+    mkLine('weekChart',d.labels,[
+      {label:'Present',data:d.present,borderColor:C.greenLine,backgroundColor:'rgba(16,185,129,.1)',fill:true,tension:.4,pointRadius:3},
+      {label:'Absent',data:d.absent,borderColor:C.redLine,fill:false,tension:.4,pointRadius:3}
+    ]);
+  });
+  fetch('/analytics/api/ct/subject-attendance').then(r=>r.json()).then(d=>{
+    mkBar('subjChart',d.labels,[{label:'Avg %',data:d.data,backgroundColor:d.data.map(v=>colorPct(v)),borderRadius:6}]);
+  });
+  fetch('/analytics/api/ct/student-list').then(r=>r.json()).then(d=>{
+    mkBar('studentChart',d.labels,[{label:'Attendance %',data:d.data,backgroundColor:d.data.map(v=>colorPct(v)),borderRadius:4}]);
+    const tb=document.getElementById('studentTbody');
+    tb.innerHTML=d.students.map((s,i)=>`<tr><td>${i+1}</td><td>${s.name}</td><td>${s.roll||'-'}</td><td><span class="badge-pct ${s.defaulter?'badge-bad':'badge-ok'}">${s.pct}%</span></td><td>${s.defaulter?'⚠️ Defaulter':'✅ Safe'}</td></tr>`).join('');
+  });
+  fetch('/analytics/api/ct/lecture-today').then(r=>r.json()).then(d=>{
+    if(d.labels.length)mkBar('lectureChart',d.labels,[
+      {label:'Present',data:d.present,backgroundColor:C.green,borderRadius:4},
+      {label:'Absent',data:d.absent,backgroundColor:C.red,borderRadius:4}
+    ],true);
+  });
+}
+
+// ── TEACHER (TG) ──────────────────────────────────────────────────────────
+if(ROLE==='TEACHER'){
+  const isTG = {{ 'true' if is_tg else 'false' }};
+  if(isTG){
+    fetch('/analytics/api/tg/summary').then(r=>r.json()).then(d=>{
+      document.getElementById('tgKpiRow').innerHTML=kpiHtml([
+        {val:d.total,label:'TG Students'},
+        {val:d.present,label:'Present Today',cls:'green'},
+        {val:d.absent,label:'Absent Today',cls:'red'},
+        {val:d.defaulters,label:'Defaulters',cls:'red'},
+        {val:d.avg_pct+'%',label:'Batch Avg'}
+      ]);
+    });
+    fetch('/analytics/api/tg/student-attendance').then(r=>r.json()).then(d=>{
+      mkBar('tgStudentChart',d.labels,[{label:'Attendance %',data:d.data,backgroundColor:d.data.map(v=>colorPct(v)),borderRadius:4}]);
+      const tb=document.getElementById('tgTbody');
+      tb.innerHTML=d.students.map((s,i)=>`<tr><td>${i+1}</td><td>${s.name}</td><td>${s.roll||'-'}</td><td><span class="badge-pct ${s.defaulter?'badge-bad':'badge-ok'}">${s.pct}%</span></td><td>${s.defaulter?'⚠️ Defaulter':'✅ Safe'}</td></tr>`).join('');
+    });
+    fetch('/analytics/api/tg/weekwise').then(r=>r.json()).then(d=>{
+      mkLine('tgWeekChart',d.labels,[
+        {label:'Present',data:d.present,borderColor:C.greenLine,backgroundColor:'rgba(16,185,129,.1)',fill:true,tension:.4,pointRadius:3},
+        {label:'Absent',data:d.absent,borderColor:C.redLine,fill:false,tension:.4,pointRadius:3}
+      ]);
+    });
+  }
+  {% if selected_subject_id %}
+  const SUBJ_ID = {{ selected_subject_id }};
+  fetch(`/analytics/api/subject/summary?subject_id=${SUBJ_ID}`).then(r=>r.json()).then(d=>{
+    document.getElementById('subjKpiRow').innerHTML=kpiHtml([
+      {val:d.total,label:'Students'},
+      {val:d.avg_pct+'%',label:'Avg Attendance'},
+      {val:d.defaulters,label:'Defaulters',cls:'red'},
+      {val:d.lectures,label:'Lectures Held'}
+    ]);
+  });
+  fetch(`/analytics/api/subject/student-attendance?subject_id=${SUBJ_ID}`).then(r=>r.json()).then(d=>{
+    mkBar('subjStudentChart',d.labels,[{label:'% in Subject',data:d.data,backgroundColor:d.data.map(v=>colorPct(v)),borderRadius:4}]);
+    const tb=document.getElementById('subjDefaulterTbody');
+    const defs=d.students.filter(s=>s.defaulter);
+    tb.innerHTML=defs.length?defs.map((s,i)=>`<tr><td>${i+1}</td><td>${s.name}</td><td>${s.roll||'-'}</td><td><span class="badge-pct badge-bad">${s.pct}%</span></td></tr>`).join(''):'<tr><td colspan="4" style="text-align:center;color:#10b981;padding:20px">🎉 No defaulters in this subject!</td></tr>';
+  });
+  fetch(`/analytics/api/subject/trend?subject_id=${SUBJ_ID}`).then(r=>r.json()).then(d=>{
+    mkLine('subjTrendChart',d.labels,[{label:'Students Present',data:d.data,borderColor:C.blueLine,backgroundColor:'rgba(99,102,241,.1)',fill:true,tension:.4,pointRadius:3}]);
+  });
+  {% endif %}
+}
+</script>
+{% endblock %}

@@ -1,0 +1,685 @@
+{% extends "base.html" %}
+{% block title %}Student Directory{% endblock %}
+{% block content %}
+<div class="page-header" style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+  <div>
+    <h1 class="page-title"><div class="title-icon">🎓</div> Student Directory</h1>
+    <p class="page-subtitle">Manage and add student records</p>
+  </div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+    <a href="{{ url_for('admin.students', search=search, category=category, gender=gender, blood=blood) }}"
+      class="btn-erp btn-secondary-erp" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px;">
+      <i class="fa-solid fa-rotate"></i> Reset
+    </a>
+    {% if current_user.role in ['SUPER_ADMIN', 'HOD', 'CLASS_TEACHER'] %}
+    <button onclick="document.getElementById('addStudentModal').style.display='flex'"
+      class="btn-erp btn-primary-erp" id="btn-add-student">
+      <i class="fa-solid fa-user-graduate"></i> Add Student
+    </button>
+    <button onclick="document.getElementById('uploadStudentsModal').style.display='flex'"
+      class="btn-erp" style="background:linear-gradient(135deg,#38a169,#276749);color:#fff;display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:8px;border:none;cursor:pointer;font-weight:600;">
+      <i class="fa-solid fa-file-excel"></i> Upload Excel
+    </button>
+    <a href="{{ url_for('admin.download_students_template') }}"
+      class="btn-erp btn-secondary-erp" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px;">
+      <i class="fa-solid fa-download"></i> Format
+    </a>
+    {% endif %}
+  </div>
+</div>
+
+{# ── Stats Row ──────────────────────────────────────────────────────────── #}
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:16px;margin-bottom:24px;">
+  <div class="card-erp" style="padding:16px;text-align:center;">
+    <div style="font-size:28px;font-weight:800;color:var(--primary-color);">{{ total }}</div>
+    <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">Total Students</div>
+  </div>
+  <div class="card-erp" style="padding:16px;text-align:center;">
+    <div style="font-size:28px;font-weight:800;color:#38b2ac;">{{ male_ct }}</div>
+    <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">Male</div>
+  </div>
+  <div class="card-erp" style="padding:16px;text-align:center;">
+    <div style="font-size:28px;font-weight:800;color:#ed64a6;">{{ female_ct }}</div>
+    <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">Female</div>
+  </div>
+  <div class="card-erp" style="padding:16px;text-align:center;">
+    {% if year_filter %}
+    <div style="font-size:28px;font-weight:800;color:#f6ad55;">
+      {{ year_filter }}<sup style="font-size:14px;">{{ 'st' if year_filter==1 else ('nd' if year_filter==2 else ('rd' if year_filter==3 else 'th')) }}</sup>
+    </div>
+    <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">Year Selected</div>
+    {% else %}
+    <div style="font-size:22px;font-weight:800;color:#f6ad55;">All</div>
+    <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">Years Shown</div>
+    {% endif %}
+  </div>
+</div>
+
+{# ── Filters ────────────────────────────────────────────────────────────── #}
+<div class="card-erp" style="margin-bottom:20px;">
+  <div class="card-body-erp">
+    <form method="GET" action="{{ url_for('admin.students') }}">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(140px, 1fr));gap:12px;align-items:end;">
+        <div style="grid-column: span 2;">
+          <label style="font-size:11px;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Search</label>
+          <input type="text" name="search" class="form-control-erp" placeholder="Name / PRN / Roll No…" value="{{ search }}" style="margin-top:4px;">
+        </div>
+
+        {% if current_user.role in ['SUPER_ADMIN', 'HOD'] %}
+        <div>
+          <label style="font-size:11px;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Year</label>
+          <select name="year" class="form-control-erp" style="margin-top:4px;" onchange="this.form.submit()">
+            <option value="">All Years</option>
+            <option value="1" {{ 'selected' if year_filter == 1 }}>1st Year (FE)</option>
+            <option value="2" {{ 'selected' if year_filter == 2 }}>2nd Year (SE)</option>
+            <option value="3" {{ 'selected' if year_filter == 3 }}>3rd Year (TE)</option>
+            <option value="4" {{ 'selected' if year_filter == 4 }}>4th Year (BE)</option>
+          </select>
+        </div>
+        {% endif %}
+
+        {% if current_user.role == 'SUPER_ADMIN' %}
+        <div>
+          <label style="font-size:11px;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Department</label>
+          <select name="department_id" class="form-control-erp" style="margin-top:4px;" onchange="this.form.submit()">
+            <option value="">All Departments</option>
+            {% for d in available_depts %}
+            <option value="{{ d.id }}" {{ 'selected' if dept_filter == d.id else '' }}>{{ d.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        {% endif %}
+
+        {% if current_user.role in ['SUPER_ADMIN', 'HOD'] %}
+        <div>
+          <label style="font-size:11px;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Class</label>
+          <select name="class_id" class="form-control-erp" style="margin-top:4px;" onchange="this.form.submit()">
+            <option value="">All Classes</option>
+            {% for c in available_classes %}
+            <option value="{{ c.id }}" {{ 'selected' if class_filter == c.id else '' }}>{{ c.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        {% endif %}
+
+        <div>
+          <label style="font-size:11px;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Category</label>
+          <select name="category" class="form-control-erp" style="margin-top:4px;">
+            <option value="">All</option>
+            {% for c in categories %}
+            <option value="{{ c }}" {{ 'selected' if category==c else '' }}>{{ c }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label style="font-size:11px;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Gender</label>
+          <select name="gender" class="form-control-erp" style="margin-top:4px;">
+            <option value="">All</option>
+            <option value="M" {{ 'selected' if gender=='M' else '' }}>Male</option>
+            <option value="F" {{ 'selected' if gender=='F' else '' }}>Female</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:11px;color:var(--text-muted);font-weight:600;text-transform:uppercase;letter-spacing:.5px;">Blood Group</label>
+          <select name="blood" class="form-control-erp" style="margin-top:4px;">
+            <option value="">All</option>
+            {% for b in blood_groups %}
+            <option value="{{ b }}" {{ 'selected' if blood==b else '' }}>{{ b }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <button type="submit" class="btn-erp btn-primary-erp" style="width:100%;height:38px;">
+            <i class="fa-solid fa-search"></i> Filter
+          </button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+{# ── Table ──────────────────────────────────────────────────────────────── #}
+<div class="card-erp">
+  <div class="card-header-erp" style="display:flex;justify-content:space-between;align-items:center;">
+    <h5>
+      Student Records
+      {% if search or category or gender or blood %}
+      <span class="badge-erp badge-info" style="font-size:11px;margin-left:8px;">Filtered</span>
+      {% endif %}
+    </h5>
+    <span style="font-size:13px;color:var(--text-muted);">
+      Showing {{ students|length }} of {{ pagination.total }} students
+    </span>
+  </div>
+
+  {# ── Floating Bulk Action Toolbar ── #}
+  <div id="bulkActionBar"
+    style="display:none;background:linear-gradient(135deg,#1a3c5e,#2a5298);border-radius:10px;
+           padding:10px 16px;margin:0 20px 14px;display:none;align-items:center;
+           gap:10px;flex-wrap:wrap;box-shadow:0 4px 20px rgba(42,82,152,.4);">
+    <span id="bulkCountLabel" style="color:#fff;font-weight:700;font-size:13px;flex:1;"></span>
+    {% if current_user.role in ['SUPER_ADMIN','HOD','CLASS_TEACHER'] %}
+    <button onclick="openBulkAssignTGModal()" class="btn-erp"
+      style="padding:5px 12px;font-size:12px;background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.3);">
+      <i class="fa-solid fa-user-tag"></i> Assign TG
+    </button>
+    <button onclick="openBulkMoveModal()" class="btn-erp"
+      style="padding:5px 12px;font-size:12px;background:rgba(246,173,85,.25);color:#f6ad55;border:1px solid rgba(246,173,85,.4);">
+      <i class="fa-solid fa-right-left"></i> Move Class
+    </button>
+    <button onclick="submitBulkAction('{{ url_for('admin.bulk_approve_students') }}')" class="btn-erp"
+      style="padding:5px 12px;font-size:12px;background:rgba(56,161,105,.25);color:#68d391;border:1px solid rgba(56,161,105,.4);">
+      <i class="fa-solid fa-check-double"></i> Approve
+    </button>
+    {% endif %}
+    <button onclick="submitBulkExport()" class="btn-erp"
+      style="padding:5px 12px;font-size:12px;background:rgba(99,179,237,.2);color:#90cdf4;border:1px solid rgba(99,179,237,.4);">
+      <i class="fa-solid fa-file-export"></i> Export Excel
+    </button>
+    {% if current_user.role in ['SUPER_ADMIN','HOD','CLASS_TEACHER'] %}
+    <button onclick="confirmBulkDelete()" class="btn-erp"
+      style="padding:5px 12px;font-size:12px;background:rgba(245,101,101,.25);color:#fc8181;border:1px solid rgba(245,101,101,.4);">
+      <i class="fa-solid fa-trash"></i> Delete
+    </button>
+    {% endif %}
+    <button onclick="clearSelection()" style="background:none;border:none;color:rgba(255,255,255,.5);font-size:18px;cursor:pointer;padding:0 4px;" title="Clear selection">×</button>
+  </div>
+
+  <div style="overflow-x:auto;">
+    <table class="table-erp" style="width:100%;min-width:900px;">
+      <thead>
+        <tr>
+          <th><input type="checkbox" id="selectAllStudents" onchange="toggleAllStudents(this)"></th>
+          <th>Roll</th>
+          <th>PRN</th>
+          <th>Name</th>
+          <th>Gender</th>
+          <th>Category</th>
+          <th>Blood</th>
+          <th>Mobile</th>
+          <th>TG</th>
+          <th>Status</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in students %}
+        <tr>
+          <td><input type="checkbox" class="student-checkbox" value="{{ s.id }}" onchange="updateBulkBtn()"></td>
+          <td><strong>{{ s.roll_no }}</strong></td>
+          <td style="font-size:12px;color:var(--text-muted);">{{ s.prn }}</td>
+          <td>
+            <div style="display:flex;align-items:center;gap:10px;">
+              {% if s.user.profile_pic and s.user.profile_pic != 'default.png' %}
+              {% set _sp = profile_pic_url(s.user.profile_pic) %}
+              {% if _sp %}
+              <img src="{{ _sp }}"
+                   alt="{{ s.user.name }}"
+                   style="width:34px;height:34px;border-radius:50%;object-fit:cover;flex-shrink:0;border:2px solid var(--border-color);">
+              {% else %}
+              <div class="user-avatar" style="width:34px;height:34px;font-size:13px;flex-shrink:0;">
+                {{ s.user.name[0] }}
+              </div>
+              {% endif %}
+              {% else %}
+              <div class="user-avatar" style="width:34px;height:34px;font-size:13px;flex-shrink:0;">
+                {{ s.user.name[0] }}
+              </div>
+              {% endif %}
+              <div>
+                <div style="font-weight:600;">{{ s.user.name }}</div>
+                <div style="font-size:11px;color:var(--text-muted);">{{ s.user.email }}</div>
+              </div>
+            </div>
+          </td>
+          <td>
+            {% if s.gender == 'M' %}
+            <span class="badge-erp badge-info">♂ Male</span>
+            {% elif s.gender == 'F' %}
+            <span class="badge-erp" style="background:rgba(237,100,166,.15);color:#ed64a6;">♀ Female</span>
+            {% else %}—{% endif %}
+          </td>
+          <td><span class="badge-erp badge-warning" style="font-size:11px;">{{ s.category or '—' }}</span></td>
+          <td>
+            <span style="font-weight:600;color:
+              {% if s.blood_group and 'O' in s.blood_group %}#f687b3
+              {% elif s.blood_group and 'A' in s.blood_group %}#76e4f7
+              {% elif s.blood_group and 'B' in s.blood_group %}#9ae6b4
+              {% else %}var(--text-muted){% endif %};">
+              {{ s.blood_group or '—' }}
+            </span>
+          </td>
+          <td style="font-size:13px;">{{ s.user.phone or '—' }}</td>
+          <td>
+            {% if s.tg %}
+            <span style="font-size:12px;font-weight:600;color:var(--accent-blue);">{{ s.tg.name }}</span>
+            {% else %}
+            <span style="color:var(--text-muted);font-size:12px;">None</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if s.approval_status == 'approved' %}
+            <span class="badge-erp badge-success">Active</span>
+            {% elif s.approval_status == 'pending' %}
+            <span class="badge-erp badge-warning">Pending</span>
+            {% else %}
+            <span class="badge-erp badge-danger">{{ s.approval_status.title() }}</span>
+            {% endif %}
+          </td>
+          <td style="white-space:nowrap;">
+            <a href="{{ url_for('admin.student_detail', id=s.id) }}" class="btn-erp btn-secondary-erp"
+              style="padding:4px 10px;font-size:12px;text-decoration:none;">
+              <i class="fa-solid fa-eye"></i> View
+            </a>
+            {% if s.approval_status == 'pending' %}
+            <form method="POST" action="{{ url_for('admin.approve_student', id=s.id) }}" style="display:inline;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="action" value="approve">
+              <button type="submit" class="btn-erp btn-success-erp" style="padding:4px 10px;font-size:12px;">
+                <i class="fa-solid fa-check"></i> Approve
+              </button>
+            </form>
+            {% endif %}
+            <button onclick="openAssignTGModal({{ s.id }}, '{{ s.tg_id or '' }}')" class="btn-erp"
+              style="padding:4px 8px;font-size:11px;background:var(--bg-hover);">
+              <i class="fa-solid fa-user-tag"></i> TG
+            </button>
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="12" style="text-align:center;padding:40px;color:var(--text-muted);">
+            <div style="font-size:40px;margin-bottom:12px;">🔍</div>
+            No students found for the selected filters.
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {# ── Pagination ── #}
+  {% if pagination.pages > 1 %}
+  <div style="display:flex;justify-content:center;gap:8px;padding:20px;border-top:1px solid var(--border-color);">
+    {% if pagination.has_prev %}
+    <a href="{{ url_for('admin.students', page=pagination.prev_num, search=search, category=category, gender=gender, blood=blood) }}"
+      class="btn-erp btn-secondary-erp" style="padding:6px 14px;text-decoration:none;">‹ Prev</a>
+    {% endif %}
+    {% for p in pagination.iter_pages(left_edge=2, right_edge=2, left_current=2, right_current=2) %}
+    {% if p %}
+    <a href="{{ url_for('admin.students', page=p, search=search, category=category, gender=gender, blood=blood) }}"
+      class="btn-erp {{ 'btn-primary-erp' if p == pagination.page else 'btn-secondary-erp' }}"
+      style="padding:6px 14px;text-decoration:none;min-width:36px;text-align:center;">{{ p }}</a>
+    {% else %}
+    <span style="padding:6px 4px;color:var(--text-muted);">…</span>
+    {% endif %}
+    {% endfor %}
+    {% if pagination.has_next %}
+    <a href="{{ url_for('admin.students', page=pagination.next_num, search=search, category=category, gender=gender, blood=blood) }}"
+      class="btn-erp btn-secondary-erp" style="padding:6px 14px;text-decoration:none;">Next ›</a>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+
+<!-- Assign TG Modal -->
+<div id="assignTGModal"
+  style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:2000;align-items:center;justify-content:center;">
+  <div class="card-erp" style="max-width:420px;width:90%;padding:0;">
+    <div class="card-header-erp">
+      <h5><i class="fa-solid fa-user-tag"></i> Assign Teacher Guardian</h5>
+      <button onclick="document.getElementById('assignTGModal').style.display='none'"
+        style="background:none;border:none;color:var(--text-muted);font-size:20px;cursor:pointer;">×</button>
+    </div>
+    <div class="card-body-erp">
+      <form method="POST" id="assignTGForm">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="student_ids" id="assignTGStudentIds" value="">
+        <div class="form-group-erp">
+          <label class="form-label-erp">Select Teacher Guardian</label>
+          <select name="tg_id" id="assignTGSelect" class="form-control-erp">
+            <option value="">-- Remove TG --</option>
+            {% for t in teachers %}
+            <option value="{{ t.id }}">{{ t.name }} ({{ t.role }})</option>
+            {% endfor %}
+          </select>
+        </div>
+        <button type="submit" class="btn-erp btn-primary-erp"
+          style="width:100%;justify-content:center;margin-top:10px;">Save</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Add Student Modal ════════════════════════════════════════════════════ -->
+<div id="addStudentModal"
+  style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:3000;align-items:center;justify-content:center;">
+  <div class="card-erp" style="max-width:600px;width:96%;padding:0;max-height:92vh;overflow-y:auto;">
+    <div class="card-header-erp" style="position:sticky;top:0;z-index:1;background:var(--bg-card);">
+      <h5><i class="fa-solid fa-user-graduate" style="color:var(--accent-blue);"></i> Add New Student</h5>
+      <button onclick="document.getElementById('addStudentModal').style.display='none'"
+        style="background:none;border:none;color:var(--text-muted);font-size:22px;cursor:pointer;line-height:1;">×</button>
+    </div>
+    <div class="card-body-erp">
+      <form method="POST" action="{{ url_for('admin.add_student') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+
+          <div class="form-group-erp" style="grid-column:span 2;">
+            <label class="form-label-erp">Full Name <span style="color:var(--danger-color);">*</span></label>
+            <div class="input-group-erp">
+              <i class="fa-solid fa-user input-icon"></i>
+              <input type="text" name="name" class="form-control-erp" placeholder="Student Full Name" required>
+            </div>
+          </div>
+
+          <div class="form-group-erp">
+            <label class="form-label-erp">Email <span style="color:var(--danger-color);">*</span></label>
+            <div class="input-group-erp">
+              <i class="fa-solid fa-envelope input-icon"></i>
+              <input type="email" name="email" class="form-control-erp" placeholder="student@csmss.edu" required>
+            </div>
+          </div>
+
+          <div class="form-group-erp">
+            <label class="form-label-erp">Phone</label>
+            <div class="input-group-erp">
+              <i class="fa-solid fa-phone input-icon"></i>
+              <input type="text" name="phone" class="form-control-erp" placeholder="9876543210">
+            </div>
+          </div>
+
+          <div class="form-group-erp">
+            <label class="form-label-erp">PRN</label>
+            <div class="input-group-erp">
+              <i class="fa-solid fa-id-card input-icon"></i>
+              <input type="text" name="prn" class="form-control-erp" placeholder="PRN2024001">
+            </div>
+          </div>
+
+          <div class="form-group-erp">
+            <label class="form-label-erp">Roll No</label>
+            <div class="input-group-erp">
+              <i class="fa-solid fa-list-ol input-icon"></i>
+              <input type="text" name="roll_no" class="form-control-erp" placeholder="01">
+            </div>
+          </div>
+
+          {% if current_user.role in ['SUPER_ADMIN', 'HOD'] %}
+          <div class="form-group-erp" style="grid-column:span 2;">
+            <label class="form-label-erp">Class</label>
+            <select name="class_id" class="form-control-erp">
+              <option value="">-- Select Class --</option>
+              {% for c in available_classes %}
+              <option value="{{ c.id }}">{{ c.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          {% endif %}
+
+          <div class="form-group-erp">
+            <label class="form-label-erp">Date of Birth</label>
+            <input type="text" name="dob" class="form-control-erp" placeholder="01-01-2004">
+          </div>
+
+          <div class="form-group-erp">
+            <label class="form-label-erp">Gender</label>
+            <select name="gender" class="form-control-erp">
+              <option value="">-- Select --</option>
+              <option value="M">Male</option>
+              <option value="F">Female</option>
+            </select>
+          </div>
+
+          <div class="form-group-erp">
+            <label class="form-label-erp">Category</label>
+            <select name="category" class="form-control-erp">
+              <option value="">-- Select --</option>
+              <option>OPEN</option><option>OBC</option><option>SC</option>
+              <option>ST</option><option>NT1</option><option>NT2</option>
+              <option>NT3</option><option>VJA</option><option>SBC</option>
+            </select>
+          </div>
+
+          <div class="form-group-erp">
+            <label class="form-label-erp">Mother's Name</label>
+            <input type="text" name="mother_name" class="form-control-erp" placeholder="Mother's Name">
+          </div>
+
+          <div class="form-group-erp" style="grid-column:span 2;">
+            <label class="form-label-erp">Password
+              <span style="font-size:11px;color:var(--text-muted);">(leave blank for default: csmss@123)</span>
+            </label>
+            <div class="input-group-erp">
+              <i class="fa-solid fa-lock input-icon"></i>
+              <input type="password" name="password" class="form-control-erp" placeholder="csmss@123 (default)">
+            </div>
+          </div>
+
+        </div>
+        <div style="display:flex;gap:10px;margin-top:6px;">
+          <button type="submit" class="btn-erp btn-primary-erp" style="flex:1;justify-content:center;">
+            <i class="fa-solid fa-plus"></i> Add Student
+          </button>
+          <button type="button" onclick="document.getElementById('addStudentModal').style.display='none'"
+            class="btn-erp btn-secondary-erp" style="flex:0 0 auto;">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Upload Students Excel Modal ══════════════════════════════════════════ -->
+<div id="uploadStudentsModal"
+  style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:3000;align-items:center;justify-content:center;">
+  <div class="card-erp" style="max-width:500px;width:96%;padding:0;">
+    <div class="card-header-erp">
+      <h5><i class="fa-solid fa-file-excel" style="color:#38a169;"></i> Upload Students via Excel</h5>
+      <button onclick="document.getElementById('uploadStudentsModal').style.display='none'"
+        style="background:none;border:none;color:var(--text-muted);font-size:22px;cursor:pointer;line-height:1;">×</button>
+    </div>
+    <div class="card-body-erp">
+      <div style="background:rgba(56,161,105,.1);border:1px solid rgba(56,161,105,.3);border-radius:10px;padding:14px;margin-bottom:18px;">
+        <p style="font-size:13px;font-weight:600;color:#68d391;margin-bottom:8px;">
+          <i class="fa-solid fa-circle-info"></i> Required Excel Columns:
+        </p>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;">
+          {% for col_name in ['name','email','phone','prn','roll_no','dob','gender','category','mother_name'] %}
+          <span style="background:rgba(56,161,105,.2);color:#9ae6b4;border-radius:4px;padding:2px 8px;font-size:11px;font-family:monospace;">{{ col_name }}</span>
+          {% endfor %}
+        </div>
+        <p style="font-size:11px;color:var(--text-muted);margin-top:8px;">
+          Default password for all uploaded students: <strong style="color:#9ae6b4;">csmss@123</strong><br>
+          <span style="color:var(--text-muted);">Only <strong>name</strong> and <strong>email</strong> are mandatory.</span>
+        </p>
+      </div>
+      <form method="POST" action="{{ url_for('admin.upload_students_excel') }}" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-group-erp" style="margin-bottom:12px;">
+          <label class="form-label-erp">Assign to Class <span style="color:var(--danger-color);">*</span></label>
+          {% if current_user.role == 'CLASS_TEACHER' and upload_classes %}
+            {# CLASS_TEACHER: locked to their own class, show as info label #}
+            <input type="hidden" name="class_id" value="{{ upload_classes[0].id }}">
+            <div style="background:rgba(99,179,237,.12);border:1px solid rgba(99,179,237,.3);border-radius:8px;padding:10px 14px;font-weight:600;color:var(--accent-blue);">
+              <i class="fa-solid fa-lock" style="margin-right:6px;font-size:12px;"></i>
+              {{ upload_classes[0].name }}
+              {% if upload_classes[0].department %} ({{ upload_classes[0].department.code }}){% endif %}
+              <div style="font-size:11px;color:var(--text-muted);margin-top:2px;font-weight:400;">Auto-assigned to your class</div>
+            </div>
+          {% else %}
+            <select name="class_id" class="form-control-erp" required>
+              <option value="">-- Select Class --</option>
+              {% for c in upload_classes %}
+              <option value="{{ c.id }}">{{ c.name }}{% if c.department %} ({{ c.department.code }}){% endif %}</option>
+              {% endfor %}
+            </select>
+            {% if not upload_classes %}
+            <div style="font-size:11px;color:var(--danger-color);margin-top:4px;">
+              <i class="fa-solid fa-triangle-exclamation"></i> No classes available. Please create classes first.
+            </div>
+            {% endif %}
+          {% endif %}
+        </div>
+        <div class="form-group-erp">
+          <label class="form-label-erp">Select Excel File (.xlsx)</label>
+          <input type="file" name="excel_file" accept=".xlsx,.xls" class="form-control-erp" required
+            style="padding:8px;">
+        </div>
+        <div style="display:flex;gap:10px;margin-top:4px;">
+          <button type="submit" class="btn-erp btn-primary-erp" style="flex:1;justify-content:center;"
+            {% if not upload_classes %}disabled title="No classes available"{% endif %}>
+            <i class="fa-solid fa-upload"></i> Upload &amp; Import
+          </button>
+          <a href="{{ url_for('admin.download_students_template') }}"
+            class="btn-erp btn-secondary-erp" style="text-decoration:none;flex:0 0 auto;">
+            <i class="fa-solid fa-download"></i> Get Format
+          </a>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Move Class Modal ═══════════════════════════════════════════════════ -->
+
+<div id="bulkMoveModal"
+  style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:3000;align-items:center;justify-content:center;">
+  <div class="card-erp" style="max-width:440px;width:96%;padding:0;">
+    <div class="card-header-erp">
+      <h5><i class="fa-solid fa-right-left" style="color:#f6ad55;"></i> Move to Another Class</h5>
+      <button onclick="document.getElementById('bulkMoveModal').style.display='none'"
+        style="background:none;border:none;color:var(--text-muted);font-size:22px;cursor:pointer;">×</button>
+    </div>
+    <div class="card-body-erp">
+      <form method="POST" action="{{ url_for('admin.bulk_move_class') }}" id="bulkMoveForm">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="student_ids" id="bulkMoveStudentIds" value="">
+        <div class="form-group-erp" style="margin-bottom:16px;">
+          <label class="form-label-erp">Select Target Class</label>
+          <select name="new_class_id" class="form-control-erp" required>
+            <option value="">-- Select Class --</option>
+            {% for c in upload_classes %}
+            <option value="{{ c.id }}">{{ c.name }}{% if c.department %} ({{ c.department.code }}){% endif %}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div style="background:rgba(245,101,101,.1);border:1px solid rgba(245,101,101,.3);border-radius:8px;padding:10px;margin-bottom:14px;font-size:12px;color:#fc8181;">
+          <i class="fa-solid fa-triangle-exclamation"></i>
+          Students' year and semester will be updated to match the target class.
+        </div>
+        <div style="display:flex;gap:10px;">
+          <button type="submit" class="btn-erp btn-primary-erp" style="flex:1;justify-content:center;">
+            <i class="fa-solid fa-right-left"></i> Move Students
+          </button>
+          <button type="button" onclick="document.getElementById('bulkMoveModal').style.display='none'"
+            class="btn-erp btn-secondary-erp">Cancel</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Hidden forms for bulk actions -->
+<form id="bulkDeleteForm" method="POST" action="{{ url_for('admin.bulk_delete_students') }}" style="display:none;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="student_ids" id="bulkDeleteIds">
+</form>
+<form id="bulkApproveForm" method="POST" action="{{ url_for('admin.bulk_approve_students') }}" style="display:none;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="student_ids" id="bulkApproveIds">
+</form>
+<form id="bulkExportForm" method="POST" action="{{ url_for('admin.export_students_excel') }}" style="display:none;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="student_ids" id="bulkExportIds">
+</form>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  function getSelectedIds() {
+    return Array.from(document.querySelectorAll('.student-checkbox:checked')).map(cb => cb.value);
+  }
+
+  function updateBulkBar() {
+    const ids = getSelectedIds();
+    const bar = document.getElementById('bulkActionBar');
+    const label = document.getElementById('bulkCountLabel');
+    if (ids.length > 0) {
+      bar.style.display = 'flex';
+      label.textContent = ids.length + ' student' + (ids.length > 1 ? 's' : '') + ' selected';
+    } else {
+      bar.style.display = 'none';
+    }
+  }
+
+  function toggleAllStudents(source) {
+    document.querySelectorAll('.student-checkbox').forEach(cb => cb.checked = source.checked);
+    updateBulkBar();
+  }
+
+  function clearSelection() {
+    document.querySelectorAll('.student-checkbox').forEach(cb => cb.checked = false);
+    document.getElementById('selectAllStudents').checked = false;
+    updateBulkBar();
+  }
+
+  // Single student TG
+  function openAssignTGModal(studentId, currentTgId) {
+    document.getElementById('assignTGSelect').value = currentTgId || '';
+    document.getElementById('assignTGStudentIds').value = studentId;
+    document.getElementById('assignTGForm').action = '/admin/students/bulk-assign-tg';
+    document.getElementById('assignTGModal').style.display = 'flex';
+  }
+
+  // Bulk TG
+  function openBulkAssignTGModal() {
+    const ids = getSelectedIds();
+    if (!ids.length) return;
+    document.getElementById('assignTGSelect').value = '';
+    document.getElementById('assignTGStudentIds').value = ids.join(',');
+    document.getElementById('assignTGForm').action = '/admin/students/bulk-assign-tg';
+    document.getElementById('assignTGModal').style.display = 'flex';
+  }
+
+  // Move Class
+  function openBulkMoveModal() {
+    const ids = getSelectedIds();
+    if (!ids.length) return;
+    document.getElementById('bulkMoveStudentIds').value = ids.join(',');
+    document.getElementById('bulkMoveModal').style.display = 'flex';
+  }
+
+  // Approve
+  function submitBulkAction(url) {
+    const ids = getSelectedIds();
+    if (!ids.length) return;
+    document.getElementById('bulkApproveIds').value = ids.join(',');
+    document.getElementById('bulkApproveForm').action = url;
+    document.getElementById('bulkApproveForm').submit();
+  }
+
+  // Export Excel
+  function submitBulkExport() {
+    const ids = getSelectedIds();
+    if (!ids.length) return;
+    document.getElementById('bulkExportIds').value = ids.join(',');
+    document.getElementById('bulkExportForm').submit();
+  }
+
+  // Delete with confirmation
+  function confirmBulkDelete() {
+    const ids = getSelectedIds();
+    if (!ids.length) return;
+    const count = ids.length;
+    if (!confirm('\u26a0\ufe0f Permanently delete ' + count + ' student' + (count > 1 ? 's' : '') + '?\n\nThis will also delete their user accounts and CANNOT be undone.')) return;
+    document.getElementById('bulkDeleteIds').value = ids.join(',');
+    document.getElementById('bulkDeleteForm').submit();
+  }
+
+  // Update bar on individual checkbox change
+  document.addEventListener('change', function(e) {
+    if (e.target.classList.contains('student-checkbox')) updateBulkBar();
+  });
+</script>
+{% endblock %}

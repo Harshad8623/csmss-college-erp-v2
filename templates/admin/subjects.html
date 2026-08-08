@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+{% block title %}Subjects{% endblock %}
+{% block content %}
+<div class="page-header" style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+  <div><h1 class="page-title"><div class="title-icon">📚</div> Subjects</h1></div>
+  <button onclick="document.getElementById('addSubModal').style.display='flex'" class="btn-erp btn-primary-erp">
+    <i class="fa-solid fa-plus"></i> Add Subject
+  </button>
+</div>
+<div class="card-erp">
+  <div class="card-body-erp" style="padding:0;">
+    <div class="table-wrap-scroll">
+    <table class="table-erp">
+      <thead><tr><th>Subject</th><th>Code</th><th>Class</th><th>Teacher</th><th>Credits</th><th>Type</th><th>Attendance</th><th style="text-align:right;">Actions</th></tr></thead>
+      <tbody>
+        {% for sub in subjects %}
+        <tr>
+          <td style="font-weight:600;">{{ sub.name }}</td>
+          <td><span class="badge-erp badge-secondary">{{ sub.code or '—' }}</span></td>
+          <td>{{ sub.class_.name if sub.class_ else '—' }}</td>
+          <td>{{ sub.teacher_user.name if sub.teacher_user else '—' }}</td>
+          <td>{{ sub.credits }}</td>
+          <td>
+            {% if sub.is_elective %}
+              <span class="badge-erp badge-warning">Elective</span>
+            {% else %}
+              <span class="badge-erp badge-success">Regular</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if sub.count_in_attendance %}
+              <span class="badge-erp badge-success" title="Counted in final attendance %">✅ Counted</span>
+            {% else %}
+              <span class="badge-erp badge-secondary" title="Attendance recorded but NOT counted in final %">⛔ Excluded</span>
+            {% endif %}
+          </td>
+          <td style="text-align:right;">
+            {% if sub.is_elective %}
+            <a href="{{ url_for('admin.enroll_elective', id=sub.id) }}" class="btn-erp" style="padding:4px 8px;font-size:12px;background:var(--bg-hover);color:var(--text-1);text-decoration:none;">
+              <i class="fa-solid fa-users"></i> Enroll
+            </a>
+            {% endif %}
+            <button onclick="openEditSubModal({{ sub.id }}, '{{ sub.name }}', '{{ sub.code or '' }}', '{{ sub.credits }}', '{{ sub.class_id or '' }}', '{{ sub.teacher_id or '' }}', {{ 'true' if sub.is_elective else 'false' }}, {{ 'true' if sub.count_in_attendance else 'false' }})" class="btn-erp" style="padding:4px 8px;font-size:12px;background:var(--bg-hover);">
+              <i class="fa-solid fa-pen"></i> Edit
+            </button>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8"><div class="empty-state"><p>No subjects created yet</p></div></td></tr>
+        {% endfor %}
+
+      </tbody>
+    </table>
+    </div>
+  </div>
+</div>
+
+<div id="addSubModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:2000;align-items:center;justify-content:center;">
+  <div class="card-erp" style="max-width:500px;width:90%;padding:0;">
+    <div class="card-header-erp">
+      <h5>Add Subject</h5>
+      <button onclick="document.getElementById('addSubModal').style.display='none'" style="background:none;border:none;color:var(--text-muted);font-size:20px;cursor:pointer;">×</button>
+    </div>
+    <div class="card-body-erp">
+      <form method="POST" action="{{ url_for('admin.create_subject') }}" data-validate>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+          <div class="form-group-erp" style="grid-column:1/-1;">
+            <label class="form-label-erp">Subject Name *</label>
+            <input type="text" name="name" class="form-control-erp" placeholder="e.g. Data Structures" required>
+          </div>
+          <div class="form-group-erp">
+            <label class="form-label-erp">Subject Code</label>
+            <input type="text" name="code" class="form-control-erp" placeholder="e.g. CS301">
+          </div>
+          <div class="form-group-erp">
+            <label class="form-label-erp">Credits</label>
+            <input type="number" name="credits" class="form-control-erp" value="3" min="1" max="6">
+          </div>
+          <div class="form-group-erp">
+            <label class="form-label-erp">Class *</label>
+            <select name="class_id" class="form-control-erp" required>
+              {% for cls in classes %}<option value="{{ cls.id }}">{{ cls.name }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="form-group-erp">
+            <label class="form-label-erp">Assign Teacher</label>
+            <select name="teacher_id" class="form-control-erp">
+              <option value="">-- Optional --</option>
+              {% for t in teachers %}<option value="{{ t.id }}">{{ t.name }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="form-group-erp" style="grid-column:1/-1; display:flex; align-items:center; gap:8px; margin-top:4px;">
+            <input type="checkbox" name="is_elective" id="addIsElective" style="width:16px;height:16px;">
+            <label for="addIsElective" class="form-label-erp" style="margin:0;cursor:pointer;">This is an Elective Subject</label>
+          </div>
+          <div class="form-group-erp" style="grid-column:1/-1; display:flex; align-items:center; gap:8px;">
+            <input type="checkbox" name="count_in_attendance" id="addCountAtt" checked style="width:16px;height:16px;accent-color:var(--accent-green);">
+            <label for="addCountAtt" class="form-label-erp" style="margin:0;cursor:pointer;">
+              Count attendance in final percentage
+              <span style="font-size:11px;color:var(--text-muted);display:block;">Uncheck for subjects like Aptitude/Skill Dev whose attendance is recorded but doesn't affect the overall %</span>
+            </label>
+          </div>
+        </div>
+        <button type="submit" class="btn-erp btn-primary-erp" style="width:100%;justify-content:center;">Create Subject</button>
+      </form>
+    </div>
+  </div>
+</div>
+<div id="editSubModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:2000;align-items:center;justify-content:center;">
+  <div class="card-erp" style="max-width:500px;width:90%;padding:0;">
+    <div class="card-header-erp">
+      <h5>Edit Subject</h5>
+      <button onclick="document.getElementById('editSubModal').style.display='none'" style="background:none;border:none;color:var(--text-muted);font-size:20px;cursor:pointer;">×</button>
+    </div>
+    <div class="card-body-erp">
+      <form method="POST" id="editSubForm" data-validate>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+          <div class="form-group-erp" style="grid-column:1/-1;">
+            <label class="form-label-erp">Subject Name *</label>
+            <input type="text" name="name" id="editSubName" class="form-control-erp" required>
+          </div>
+          <div class="form-group-erp">
+            <label class="form-label-erp">Subject Code</label>
+            <input type="text" name="code" id="editSubCode" class="form-control-erp">
+          </div>
+          <div class="form-group-erp">
+            <label class="form-label-erp">Credits</label>
+            <input type="number" name="credits" id="editSubCredits" class="form-control-erp" min="1" max="6">
+          </div>
+          <div class="form-group-erp">
+            <label class="form-label-erp">Class *</label>
+            <select name="class_id" id="editSubClass" class="form-control-erp" required>
+              {% for cls in classes %}<option value="{{ cls.id }}">{{ cls.name }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="form-group-erp">
+            <label class="form-label-erp">Assign Teacher</label>
+            <select name="teacher_id" id="editSubTeacher" class="form-control-erp">
+              <option value="">-- Optional --</option>
+              {% for t in teachers %}<option value="{{ t.id }}">{{ t.name }}</option>{% endfor %}
+            </select>
+          </div>
+          <div class="form-group-erp" style="grid-column:1/-1; display:flex; align-items:center; gap:8px; margin-top:4px;">
+            <input type="checkbox" name="is_elective" id="editIsElective" style="width:16px;height:16px;">
+            <label for="editIsElective" class="form-label-erp" style="margin:0;cursor:pointer;">This is an Elective Subject</label>
+          </div>
+          <div class="form-group-erp" style="grid-column:1/-1; display:flex; align-items:center; gap:8px;">
+            <input type="checkbox" name="count_in_attendance" id="editCountAtt" checked style="width:16px;height:16px;accent-color:var(--accent-green);">
+            <label for="editCountAtt" class="form-label-erp" style="margin:0;cursor:pointer;">
+              Count attendance in final percentage
+              <span style="font-size:11px;color:var(--text-muted);display:block;">Uncheck for subjects like Aptitude/Skill Dev whose attendance is recorded but doesn't affect the overall %</span>
+            </label>
+          </div>
+        </div>
+        <button type="submit" class="btn-erp btn-primary-erp" style="width:100%;justify-content:center;margin-top:14px;">Save Changes</button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function openEditSubModal(id, name, code, credits, classId, teacherId, isElective, countAtt) {
+  document.getElementById('editSubName').value = name;
+  document.getElementById('editSubCode').value = code;
+  document.getElementById('editSubCredits').value = credits;
+  document.getElementById('editSubClass').value = classId;
+  document.getElementById('editSubTeacher').value = teacherId;
+  document.getElementById('editIsElective').checked = isElective;
+  document.getElementById('editCountAtt').checked = countAtt;
+  document.getElementById('editSubForm').action = "/admin/subjects/edit/" + id;
+  document.getElementById('editSubModal').style.display = 'flex';
+}
+</script>
+{% endblock %}

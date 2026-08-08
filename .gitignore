@@ -1,0 +1,35 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.env
+instance/college_erp.db
+instance/college_erp.db-shm
+instance/college_erp.db-wal
+.DS_Store
+
+# Dev working files — never commit
+.gemini/
+
+
+# User uploads — never commit these
+static/uploads/
+
+# Test & cache
+.pytest_cache/
+test_app.py
+
+# One-off and utility scripts
+seed.py
+gen_students.py
+add_timetable_batch.py
+migrate_grievance.py
+check_templates.py
+deep_audit.py
+
+# Editor / OS
+*.swp
+Thumbs.db

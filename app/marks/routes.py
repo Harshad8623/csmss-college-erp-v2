@@ -1,0 +1,560 @@
+from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, abort
+from flask_login import login_required, current_user
+from app.extensions import db
+from app.models import Marks, Student, Subject, Class, User, Roles, ApprovalStatus, ExamType
+from app.utils.decorators import role_required
+from app.utils.helpers import send_notification, get_grade, get_dept_for_hod, get_class_for_ct, get_students_for_subject
+import io
+import openpyxl
+from openpyxl.styles import Font, PatternFill, Alignment
+from flask import send_file
+
+marks_bp = Blueprint('marks', __name__, url_prefix='/marks')
+
+def _scoped_subjects():
+    """Return subjects list scoped by current user's role."""
+    role = current_user.role
+    if role == Roles.SUPER_ADMIN:
+        return Subject.query.all()
+    elif role == Roles.HOD:
+        dept_id = get_dept_for_hod(current_user.id)
+        if dept_id:
+            class_ids = [c.id for c in Class.query.filter_by(department_id=dept_id).all()]
+            return Subject.query.filter(Subject.class_id.in_(class_ids)).all()
+        return []
+    elif role == Roles.CLASS_TEACHER:
+        cls = get_class_for_ct(current_user.id)
+        return Subject.query.filter_by(class_id=cls.id).all() if cls else []
+    else:
+        return Subject.query.filter_by(teacher_id=current_user.id).all()
+
+@marks_bp.route('/')
+@login_required
+def index():
+    if current_user.role in [Roles.TEACHER, Roles.CLASS_TEACHER, Roles.HOD, Roles.SUPER_ADMIN]:
+        subjects = _scoped_subjects()
+        return render_template('marks/teacher_view.html', subjects=subjects)
+    else:
+        student = Student.query.filter_by(user_id=current_user.id).first()
+        if not student:
+            flash('Student profile not found.', 'danger')
+            return redirect(url_for('dashboard.index'))
+        all_marks = Marks.query.filter_by(student_id=student.id)\
+            .order_by(Marks.created_at.desc()).all()
+        # Group by subject
+        subjects_summary = {}
+        for m in all_marks:
+            sid = m.subject_id
+            if sid not in subjects_summary:
+                subjects_summary[sid] = {'subject': m.subject, 'marks': []}
+            subjects_summary[sid]['marks'].append(m)
+        return render_template('marks/student_view.html',
+            student=student, subjects_summary=subjects_summary.values())
+
+@marks_bp.route('/upload', methods=['GET', 'POST'])
+@login_required
+@role_required(Roles.TEACHER, Roles.CLASS_TEACHER, Roles.HOD, Roles.SUPER_ADMIN)
+def upload():
+    subjects = _scoped_subjects()
+
+    selected_subject = None
+    students = []
+    exam_type = request.args.get('exam_type', ExamType.CT1)
+    subject_id = request.args.get('subject_id') or request.form.get('subject_id')
+
+    if subject_id:
+        selected_subject = Subject.query.get(subject_id)
+        # Scope check — block access to out-of-scope subjects
+        if selected_subject and selected_subject not in subjects:
+            abort(403)
+        exam_type = request.args.get('exam_type', ExamType.CT1) or request.form.get('exam_type', ExamType.CT1)
+        if selected_subject:
+            students = get_students_for_subject(selected_subject)
+
+    if request.method == 'POST' and selected_subject:
+        exam_type = request.form.get('exam_type', ExamType.CT1)
+        max_marks = float(request.form.get('max_marks', 100) or 100)
+        if max_marks <= 0:
+            flash('Max marks must be greater than 0.', 'danger')
+            return redirect(url_for('marks.upload', subject_id=selected_subject.id, exam_type=exam_type))
+        count = 0
+        for student in students:
+            marks_val = request.form.get(f'marks_{student.id}', '').strip()
+            if marks_val == '':
+                continue
+            try:
+                marks_float = float(marks_val)
+                if marks_float < 0:
+                    flash(f'Marks cannot be negative for student {student.user.name}.', 'danger')
+                    continue
+                if marks_float > max_marks:
+                    flash(f'Marks {marks_float} exceed max marks {max_marks} for {student.user.name}. Capped.', 'warning')
+                    marks_float = max_marks
+            except ValueError:
+                continue
+            # Upsert
+            existing = Marks.query.filter_by(
+                student_id=student.id,
+                subject_id=selected_subject.id,
+                exam_type=exam_type
+            ).first()
+            if existing:
+                existing.marks = marks_float
+                existing.max_marks = max_marks
+                existing.uploaded_by = current_user.id
+            else:
+                m = Marks(student_id=student.id, subject_id=selected_subject.id,
+                          marks=marks_float, max_marks=max_marks, exam_type=exam_type,
+                          uploaded_by=current_user.id)
+                db.session.add(m)
+            count += 1
+
+        db.session.commit()
+        # Batch notify all students at once (not inside loop to avoid N commits)
+        from app.models import Notification
+        notifs = [
+            Notification(
+                user_id=student.user_id,
+                message=f'📊 Marks uploaded for {selected_subject.name} — {exam_type.title()}',
+                type='info',
+                link=url_for('marks.index')
+            )
+            for student in students
+            if request.form.get(f'marks_{student.id}', '').strip() != ''
+        ]
+        if notifs:
+            db.session.bulk_save_objects(notifs)
+            db.session.commit()
+        flash(f'Marks uploaded for {count} students — {selected_subject.name} [{exam_type}]', 'success')
+        return redirect(url_for('marks.upload', subject_id=selected_subject.id, exam_type=exam_type))
+
+    # Load existing marks for display
+    existing_marks = {}
+    if selected_subject:
+        for m in Marks.query.filter_by(subject_id=selected_subject.id, exam_type=exam_type).all():
+            existing_marks[m.student_id] = m
+
+    return render_template('marks/upload.html',
+        subjects=subjects, selected_subject=selected_subject,
+        students=students, exam_type=exam_type,
+        existing_marks=existing_marks,
+        exam_types=ExamType.ALL,
+        exam_labels=ExamType.LABELS,
+    )
+
+@marks_bp.route('/export-template/<int:subject_id>/<exam_type>')
+@login_required
+@role_required(Roles.TEACHER, Roles.CLASS_TEACHER, Roles.HOD, Roles.SUPER_ADMIN)
+def export_template(subject_id, exam_type):
+    subject = Subject.query.get_or_404(subject_id)
+    subjects_scope = _scoped_subjects()
+    if subject not in subjects_scope:
+        abort(403)
+    
+    students = get_students_for_subject(subject)
+    
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = f"Marks_{exam_type}"
+    
+    headers = ['Roll No', 'PRN', 'Student Name', 'Max Marks', 'Marks Obtained']
+    ws.append(headers)
+    
+    for col in range(1, 6):
+        cell = ws.cell(row=1, column=col)
+        cell.font = Font(bold=True)
+        cell.fill = PatternFill(start_color="E0E0E0", end_color="E0E0E0", fill_type="solid")
+    
+    ws.column_dimensions['A'].width = 15
+    ws.column_dimensions['B'].width = 20
+    ws.column_dimensions['C'].width = 35
+    ws.column_dimensions['D'].width = 15
+    ws.column_dimensions['E'].width = 15
+    
+    for student in students:
+        ws.append([
+            student.roll_no or '',
+            student.prn or '',
+            student.user.name if student.user else 'Unknown',
+            100,  # Default Max Marks
+            ''    # Marks Obtained to be filled by teacher
+        ])
+    
+    out = io.BytesIO()
+    wb.save(out)
+    out.seek(0)
+    
+    import re
+    safe_name = re.sub(r'[^a-zA-Z0-9]', '_', subject.name[:15])
+    safe_exam = re.sub(r'[^a-zA-Z0-9]', '_', str(exam_type))
+    filename = f"Marks_Template_{safe_name}_{safe_exam}.xlsx"
+    return send_file(out, download_name=filename, as_attachment=True, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+@marks_bp.route('/upload-excel', methods=['POST'])
+@login_required
+@role_required(Roles.TEACHER, Roles.CLASS_TEACHER, Roles.HOD, Roles.SUPER_ADMIN)
+def upload_excel():
+    subject_id = request.form.get('subject_id')
+    exam_type = request.form.get('exam_type')
+    
+    if not subject_id or not exam_type:
+        flash('Missing subject or exam type.', 'danger')
+        return redirect(url_for('marks.upload'))
+        
+    subject = Subject.query.get_or_404(subject_id)
+    if subject not in _scoped_subjects():
+        abort(403)
+        
+    if 'file' not in request.files:
+        flash('No file part', 'danger')
+        return redirect(url_for('marks.upload', subject_id=subject_id, exam_type=exam_type))
+        
+    file = request.files['file']
+    if file.filename == '':
+        flash('No selected file', 'danger')
+        return redirect(url_for('marks.upload', subject_id=subject_id, exam_type=exam_type))
+        
+    try:
+        wb = openpyxl.load_workbook(file, data_only=True)
+        ws = wb.active
+        
+        headers = [str(cell.value).strip().lower() if cell.value else '' for cell in ws[1]]
+        
+        prn_idx = -1
+        roll_idx = -1
+        max_idx = -1
+        marks_idx = -1
+        
+        for i, h in enumerate(headers):
+            if 'prn' in h: prn_idx = i
+            elif 'roll' in h: roll_idx = i
+            elif 'max' in h: max_idx = i
+            elif ('obtain' in h) or ('marks' in h and 'max' not in h): marks_idx = i
+            
+        if (prn_idx == -1 and roll_idx == -1) or marks_idx == -1:
+            flash('Invalid template. Missing PRN/Roll No or Marks column.', 'danger')
+            return redirect(url_for('marks.upload', subject_id=subject_id, exam_type=exam_type))
+            
+        students = {s.prn: s for s in get_students_for_subject(subject) if s.prn}
+        roll_students = {s.roll_no: s for s in get_students_for_subject(subject) if s.roll_no}
+        
+        count = 0
+        notified_user_ids = set()  # Collect here during first loop (avoid 2nd worksheet iteration)
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            prn = str(row[prn_idx]).strip() if prn_idx != -1 and row[prn_idx] is not None else None
+            roll = str(row[roll_idx]).strip() if roll_idx != -1 and row[roll_idx] is not None else None
+            
+            marks_val = row[marks_idx]
+            max_val = row[max_idx] if max_idx != -1 and row[max_idx] is not None else 100
+            
+            if marks_val is None or str(marks_val).strip() == '':
+                continue
+                
+            try:
+                marks_float = float(marks_val)
+                max_float = float(max_val)
+            except (ValueError, TypeError):  # TypeError: can't convert list/datetime to float
+                continue
+                
+            student = students.get(prn) or roll_students.get(roll)
+            if not student:
+                continue
+
+            # Validate marks range (same rules as manual upload)
+            if marks_float < 0:
+                continue
+            if marks_float > max_float:
+                marks_float = max_float
+
+            existing = Marks.query.filter_by(
+                student_id=student.id,
+                subject_id=subject.id,
+                exam_type=exam_type
+            ).first()
+            
+            if existing:
+                existing.marks = marks_float
+                existing.max_marks = max_float
+                existing.uploaded_by = current_user.id
+            else:
+                m = Marks(student_id=student.id, subject_id=subject.id,
+                          marks=marks_float, max_marks=max_float, exam_type=exam_type,
+                          uploaded_by=current_user.id)
+                db.session.add(m)
+            count += 1
+            # Collect user_id for notification (done here — avoids second ws iteration below)
+            if student.user_id:
+                notified_user_ids.add(student.user_id)
+
+        # Batch notify only students whose marks were actually processed
+        from app.models import Notification
+        notifs = [
+            Notification(
+                user_id=uid,
+                message=f'\U0001f4ca Marks uploaded for {subject.name} \u2014 {exam_type.title()}',
+                type='info',
+                link=url_for('marks.index')
+            )
+            for uid in notified_user_ids
+        ]
+        if notifs:
+            db.session.bulk_save_objects(notifs)
+
+        db.session.commit()
+        flash(f'Successfully imported marks for {count} students.', 'success')
+        
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Error processing file: {str(e)}', 'danger')
+        
+    return redirect(url_for('marks.upload', subject_id=subject_id, exam_type=exam_type))
+
+@marks_bp.route('/report/<int:class_id>')
+@login_required
+@role_required(Roles.TEACHER, Roles.CLASS_TEACHER, Roles.HOD, Roles.SUPER_ADMIN)
+def class_report(class_id):
+    class_ = Class.query.get_or_404(class_id)
+    # Scope check
+    if current_user.role == Roles.HOD:
+        dept_id = get_dept_for_hod(current_user.id)
+        if class_.department_id != dept_id:
+            abort(403)
+    elif current_user.role == Roles.CLASS_TEACHER:
+        cls = get_class_for_ct(current_user.id)
+        if not cls or cls.id != class_id:
+            abort(403)
+    elif current_user.role == Roles.TEACHER:
+        taught_class_ids = [s.class_id for s in Subject.query.filter_by(teacher_id=current_user.id).all() if s.class_id]
+        tg_class_ids = [s.class_id for s in Student.query.filter_by(tg_id=current_user.id).all() if s.class_id]
+        if class_id not in taught_class_ids and class_id not in tg_class_ids:
+            abort(403)
+    students = Student.query.filter_by(class_id=class_id, approval_status=ApprovalStatus.APPROVED).all()
+    subjects = Subject.query.filter_by(class_id=class_id).all()
+    exam_type = request.args.get('exam_type', ExamType.CT1)
+
+    report = []
+    student_ids = [s.id for s in students]
+    subject_ids = [s.id for s in subjects]
+    
+    import collections
+    marks_dict = collections.defaultdict(dict)
+    
+    if student_ids and subject_ids:
+        all_marks = Marks.query.filter(
+            Marks.student_id.in_(student_ids),
+            Marks.subject_id.in_(subject_ids),
+            Marks.exam_type == exam_type
+        ).all()
+        for m in all_marks:
+            marks_dict[m.student_id][m.subject_id] = m
+
+    for student in students:
+        row = {'student': student, 'subjects': {}, 'total': 0, 'max_total': 0}
+        for sub in subjects:
+            if sub.is_elective and student not in sub.enrolled_students:
+                row['subjects'][sub.id] = 'N/A'
+                continue
+            
+            m = marks_dict[student.id].get(sub.id)
+            row['subjects'][sub.id] = m
+            if m:
+                row['total'] += m.marks
+                row['max_total'] += m.max_marks
+        row['percentage'] = round((row['total'] / row['max_total']) * 100, 2) if row['max_total'] else 0
+        row['grade_info'] = get_grade(row['percentage'])
+        report.append(row)
+
+    # Sort by percentage descending for rank
+    report.sort(key=lambda x: x['percentage'], reverse=True)
+    for i, r in enumerate(report):
+        r['rank'] = i + 1
+
+    return render_template('marks/class_report.html',
+        class_=class_, subjects=subjects, report=report, exam_type=exam_type,
+        exam_types=ExamType.ALL,
+        exam_labels=ExamType.LABELS,
+    )
+
+@marks_bp.route('/api/performance/<int:student_id>')
+@login_required
+def performance_data(student_id):
+    student = Student.query.get_or_404(student_id)
+
+    # Auth: students can only see their own performance data
+    if current_user.role in [Roles.STUDENT, Roles.CR]:
+        my_student = Student.query.filter_by(user_id=current_user.id).first()
+        if not my_student or my_student.id != student_id:
+            from flask import abort
+            abort(403)
+    # Staff scope check: teachers can only see students in their taught classes or TG students
+    elif current_user.role == Roles.TEACHER:
+        taught_class_ids = [s.class_id for s in Subject.query.filter_by(teacher_id=current_user.id).all() if s.class_id]
+        is_tg = (student.tg_id == current_user.id)
+        if student.class_id not in taught_class_ids and not is_tg:
+            abort(403)
+    elif current_user.role == Roles.CLASS_TEACHER:
+        cls = get_class_for_ct(current_user.id)
+        if not cls or student.class_id != cls.id:
+            abort(403)
+    elif current_user.role == Roles.HOD:
+        dept_id = get_dept_for_hod(current_user.id)
+        cls = Class.query.get(student.class_id)
+        if not cls or cls.department_id != dept_id:
+            abort(403)
+
+    all_class_subjects = Subject.query.filter_by(class_id=student.class_id).all()
+    subjects = [s for s in all_class_subjects if not s.is_elective or student in s.enrolled_students]
+    subject_ids = [s.id for s in subjects]
+
+    # Single bulk query — avoids N+1 (was: 1 query per subject per exam_type = up to 32 queries)
+    all_marks_rows = Marks.query.filter(
+        Marks.student_id == student_id,
+        Marks.subject_id.in_(subject_ids)
+    ).all() if subject_ids else []
+
+    # Build lookup: {(subject_id, exam_type): marks_obj}
+    marks_lookup = {(m.subject_id, m.exam_type): m for m in all_marks_rows}
+
+    labels = [s.name for s in subjects]
+    datasets = {}
+    for et in ExamType.ALL:
+        datasets[et] = [
+            marks_lookup[(s.id, et)].percentage if (s.id, et) in marks_lookup else 0
+            for s in subjects
+        ]
+    return jsonify({'labels': labels, 'datasets': datasets, 'exam_labels': ExamType.LABELS})
+
+
+# ── Report Cards ───────────────────────────────────────────────────────────────
+@marks_bp.route('/report-cards/<int:class_id>')
+@login_required
+@role_required(Roles.CLASS_TEACHER, Roles.HOD, Roles.SUPER_ADMIN)
+def report_cards(class_id):
+    """
+    Generate printable Attendance & Performance Report Cards for all students
+    in a class — matching the CSMSS college format.
+    Class Teacher can only view their own class.
+    """
+    from app.models import Attendance
+    from sqlalchemy import func
+
+    class_ = Class.query.get_or_404(class_id)
+
+    # Scope check
+    if current_user.role == Roles.CLASS_TEACHER:
+        cls = get_class_for_ct(current_user.id)
+        if not cls or cls.id != class_id:
+            abort(403)
+    elif current_user.role == Roles.HOD:
+        dept_id = get_dept_for_hod(current_user.id)
+        if class_.department_id != dept_id:
+            abort(403)
+
+    students = (Student.query
+                .filter_by(class_id=class_id, approval_status=ApprovalStatus.APPROVED)
+                .order_by(Student.roll_no)
+                .all())
+    subjects = Subject.query.filter_by(class_id=class_id).all()
+
+    student_ids = [s.id for s in students]
+    subject_ids = [s.id for s in subjects]
+
+    # ── Bulk-fetch attendance counts per (student_id, subject_id) ─────────────
+    att_rows = (db.session.query(
+                    Attendance.student_id,
+                    Attendance.subject_id,
+                    func.count(Attendance.id).label('total'),
+                    func.sum(db.cast(Attendance.status, db.Integer)).label('present')
+                )
+                .filter(Attendance.student_id.in_(student_ids),
+                        Attendance.subject_id.in_(subject_ids))
+                .group_by(Attendance.student_id, Attendance.subject_id)
+                .all()) if student_ids and subject_ids else []
+
+    # Build lookup {student_id: {subject_id: (total, present)}}
+    import collections
+    att_lookup = collections.defaultdict(dict)
+    for row in att_rows:
+        att_lookup[row.student_id][row.subject_id] = (int(row.total or 0), int(row.present or 0))
+
+    # ── Bulk-fetch all marks ───────────────────────────────────────────────────
+    all_marks = (Marks.query
+                 .filter(Marks.student_id.in_(student_ids),
+                         Marks.subject_id.in_(subject_ids))
+                 .all()) if student_ids and subject_ids else []
+
+    marks_lookup = collections.defaultdict(dict)   # {student_id: {(subject_id, exam_type): marks_obj}}
+    for m in all_marks:
+        marks_lookup[m.student_id][(m.subject_id, m.exam_type)] = m
+
+    # ── Build per-student card data ────────────────────────────────────────────
+    cards = []
+    for student in students:
+        att_data = []   # list of {subject, total, present, pct, counted}
+        grand_total = grand_present = 0
+        for sub in subjects:
+            total, present = att_lookup[student.id].get(sub.id, (0, 0))
+            pct = round((present / total * 100), 1) if total else 0
+            counted = sub.count_in_attendance
+            att_data.append({'subject': sub, 'total': total, 'present': present, 'pct': pct, 'counted': counted})
+            if counted:   # only count toward the final attendance %
+                grand_total += total
+                grand_present += present
+
+        overall_att_pct = round((grand_present / grand_total * 100), 1) if grand_total else 0
+
+        marks_data = []  # list of {subject, ct1, mse, ct2} — only counted subjects
+        for sub in subjects:
+            if not sub.count_in_attendance:
+                continue   # skip subjects not counted in attendance (e.g. Aptitude, Skill Dev)
+            def _m(et, _sub=sub):
+                obj = marks_lookup[student.id].get((_sub.id, et))
+                return f"{obj.marks:.0f}/{obj.max_marks:.0f}" if obj else '—'
+            marks_data.append({
+                'subject': sub,
+                'ct1': _m(ExamType.CT1),
+                'mse': _m(ExamType.MSE),
+                'ct2': _m(ExamType.CT2),
+            })
+
+        cards.append({
+            'student':          student,
+            'att_data':         att_data,
+            'grand_total':      grand_total,
+            'grand_present':    grand_present,
+            'overall_att_pct':  overall_att_pct,
+            'marks_data':       marks_data,
+        })
+
+    # Academic year / semester from first student, fallback to class name
+    ay = 'A.Y. 2025-26'
+    semester = None
+    if students:
+        s0 = students[0]
+        if s0.semester:
+            semester = f'Semester {s0.semester} ({"Even" if s0.semester % 2 == 0 else "Odd"})'
+        if s0.current_year:
+            years = {1: 'FY', 2: 'SY', 3: 'TY', 4: 'Final Year'}
+            div = class_.name
+    
+    # Class teacher name
+    ct_name = ''
+    if class_.class_teacher:
+        ct_name = class_.class_teacher.name
+
+    # Department name
+    dept_name = ''
+    if class_.department:
+        dept_name = class_.department.name
+
+    return render_template('marks/report_cards.html',
+        class_=class_,
+        cards=cards,
+        subjects=subjects,
+        ct_name=ct_name,
+        dept_name=dept_name,
+        ay=ay,
+        semester=semester,
+        exam_labels=ExamType.LABELS,
+    )
+

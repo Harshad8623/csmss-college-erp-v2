@@ -1,0 +1,545 @@
+{% extends "base.html" %}
+{% block title %}Timetable{% endblock %}
+
+{% block extra_css %}
+<style>
+  /* ── Outer layout ────────────────────────────────────────────────── */
+  .tt-wrapper {
+    display: flex;
+    gap: 0;
+    overflow-x: auto;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    background: var(--bg-card);
+  }
+
+  /* ── Time axis column ────────────────────────────────────────────── */
+  .tt-axis {
+    position: relative;
+    width: 72px;
+    flex-shrink: 0;
+    border-right: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    border-radius: 12px 0 0 12px;
+  }
+  .tt-axis-label {
+    position: absolute;
+    right: 8px;
+    transform: translateY(-50%);
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-muted);
+    white-space: nowrap;
+    letter-spacing: 0.3px;
+  }
+
+  /* ── Day columns ─────────────────────────────────────────────────── */
+  .tt-days-wrap {
+    flex: 1;
+    display: flex;
+    min-width: 0;
+  }
+  .tt-day-col {
+    flex: 1;
+    position: relative;
+    border-right: 1px solid var(--border-color);
+    min-width: 120px;
+  }
+  .tt-day-col:last-child { border-right: none; }
+
+  .tt-day-hdr {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    text-align: center;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: var(--accent-blue);
+    padding: 8px 4px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  /* The scrollable content area within each column */
+  .tt-day-body {
+    position: relative;
+  }
+
+  /* ── Horizontal grid lines (every hour) ──────────────────────────── */
+  .tt-gridline {
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: rgba(255,255,255,0.05);
+    pointer-events: none;
+  }
+
+  /* ── Break strips ────────────────────────────────────────────────── */
+  .tt-break {
+    position: absolute;
+    left: 0; right: 0;
+    background: rgba(245,158,11,0.08);
+    border-top: 1px dashed rgba(245,158,11,0.4);
+    border-bottom: 1px dashed rgba(245,158,11,0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 5;
+    pointer-events: none;
+  }
+  .tt-break-label {
+    font-size: 9px;
+    font-weight: 700;
+    color: rgba(245,158,11,0.7);
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+
+  /* ── Class entry block ───────────────────────────────────────────── */
+  .tt-group {
+    position: absolute;
+    left: 2px; right: 2px;
+    display: flex;
+    gap: 2px;
+    z-index: 10;
+  }
+  .tt-entry {
+    flex: 1;
+    background: rgba(59,130,246,0.08);
+    border: 1px solid rgba(59,130,246,0.22);
+    border-radius: 6px;
+    padding: 5px 6px 4px;
+    overflow: hidden;
+    transition: background .15s, box-shadow .15s;
+    cursor: default;
+  }
+  .tt-entry:hover {
+    background: rgba(59,130,246,0.18);
+    box-shadow: 0 4px 16px rgba(0,0,0,.25);
+    z-index: 15;
+  }
+  .tt-entry.practical {
+    background: rgba(245,158,11,0.09);
+    border-color: rgba(245,158,11,0.28);
+  }
+  .tt-entry.practical:hover {
+    background: rgba(245,158,11,0.2);
+  }
+
+  .tt-tag {
+    display: inline-block;
+    font-size: 8px;
+    font-weight: 700;
+    padding: 1px 4px;
+    border-radius: 3px;
+    margin-bottom: 2px;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+  }
+  .tt-tag.theory   { background: rgba(72,187,120,0.15); color: #68d391; }
+  .tt-tag.practical{ background: rgba(245,158,11,0.18); color: #f6ad55; }
+  .tt-tag.batch    { background: rgba(99,179,237,0.18); color: var(--accent-blue); margin-left: 2px; }
+
+  .tt-entry-name {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-primary);
+    line-height: 1.25;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .tt-entry-time   { font-size: 9px; color: var(--accent-blue); font-weight: 600; margin-top: 2px; }
+  .tt-entry-teacher{ font-size: 9px; color: var(--text-muted); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* ── Currently-live class ───────────────────────────────────────── */
+  .tt-entry.now {
+    background: rgba(72,187,120,0.15) !important;
+    border-color: rgba(72,187,120,0.55) !important;
+    box-shadow: 0 0 0 2px rgba(72,187,120,0.25), 0 4px 18px rgba(72,187,120,0.15);
+  }
+  .tt-entry.now .tt-entry-name { color: #68d391; }
+  .tt-entry.now .tt-entry-time { color: #68d391; }
+  .tt-now-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 8px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    color: #68d391;
+    background: rgba(72,187,120,0.15);
+    border: 1px solid rgba(72,187,120,0.4);
+    border-radius: 3px;
+    padding: 1px 5px;
+    margin-left: 4px;
+    text-transform: uppercase;
+  }
+  .tt-now-dot {
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: #68d391;
+    animation: nowPulse 1.5s ease-in-out infinite;
+    flex-shrink: 0;
+  }
+  @keyframes nowPulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%       { opacity: .4; transform: scale(0.6); }
+  }
+
+  /* ── Teacher's own class ─────────────────────────────────────── */
+  .tt-entry.mine {
+    background: rgba(99,102,241,0.16) !important;
+    border-color: rgba(99,102,241,0.5) !important;
+    animation: mineGlow 2.8s ease-in-out infinite;
+  }
+  .tt-entry.mine.now {
+    /* If it's BOTH the teacher's class AND live, merge the glows */
+    animation: mineGlowNow 2.8s ease-in-out infinite;
+  }
+  @keyframes mineGlow {
+    0%, 100% { box-shadow: 0 0 0 1.5px rgba(99,102,241,0.28), 0 4px 18px rgba(99,102,241,0.12); }
+    50%       { box-shadow: 0 0 0 3px   rgba(99,102,241,0.48), 0 8px 28px rgba(99,102,241,0.22); }
+  }
+  @keyframes mineGlowNow {
+    0%, 100% { box-shadow: 0 0 0 2px rgba(72,187,120,0.35), 0 0 0 4px rgba(99,102,241,0.2), 0 4px 18px rgba(99,102,241,0.15); }
+    50%       { box-shadow: 0 0 0 2px rgba(72,187,120,0.55), 0 0 0 5px rgba(99,102,241,0.35), 0 8px 28px rgba(99,102,241,0.25); }
+  }
+  .tt-entry.mine .tt-entry-name { color: #a5b4fc; }
+  .tt-entry.mine .tt-entry-time { color: #818cf8; }
+
+  .tt-mine-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 8px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    color: #a5b4fc;
+    background: rgba(99,102,241,0.15);
+    border: 1px solid rgba(99,102,241,0.4);
+    border-radius: 3px;
+    padding: 1px 5px;
+    margin-left: 4px;
+    text-transform: uppercase;
+  }
+
+  /* ── Mobile day-tab switcher ──────────────────────────────── */
+  .tt-mobile-tabs {
+    display: none;
+  }
+
+  @media (max-width: 767px) {
+    /* Show tab bar, hide on desktop */
+    .tt-mobile-tabs {
+      display: flex;
+      overflow-x: auto;
+      gap: 6px;
+      padding: 10px;
+      background: var(--bg-secondary);
+      border-radius: 12px;
+      margin-bottom: 14px;
+      scrollbar-width: none;
+    }
+    .tt-mobile-tabs::-webkit-scrollbar { display: none; }
+
+    .tt-mobile-tab {
+      flex-shrink: 0;
+      padding: 7px 16px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      cursor: pointer;
+      border: 1px solid var(--border-color);
+      background: var(--bg-card);
+      color: var(--text-muted);
+      transition: all 0.2s;
+      text-transform: uppercase;
+    }
+    .tt-mobile-tab.active {
+      background: var(--accent-blue);
+      color: #fff;
+      border-color: var(--accent-blue);
+      box-shadow: 0 2px 10px rgba(59,130,246,0.35);
+    }
+    .tt-mobile-tab.today-tab {
+      border-color: rgba(72,187,120,0.5);
+    }
+    .tt-mobile-tab.today-tab.active {
+      background: rgba(72,187,120,0.85);
+      border-color: #68d391;
+      box-shadow: 0 2px 10px rgba(72,187,120,0.35);
+    }
+
+    /* In mobile mode: only show the selected day column */
+    .tt-wrapper {
+      overflow-x: hidden;
+    }
+    .tt-day-col {
+      display: none;
+      min-width: unset;
+    }
+    .tt-day-col.mobile-active {
+      display: block;
+      flex: 1;
+    }
+    .tt-days-wrap {
+      flex: 1;
+    }
+    /* Slightly smaller text on mobile entries */
+    .tt-entry-name { font-size: 10px; }
+    .tt-entry-time, .tt-entry-teacher { font-size: 8px; }
+    .tt-axis { width: 58px; }
+    .tt-axis-label { font-size: 9px; right: 5px; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header" style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px;">
+  <div>
+    <h1 class="page-title"><div class="title-icon">📅</div> Timetable</h1>
+    <p class="page-subtitle">Weekly class schedule</p>
+  </div>
+  {% if current_user.role in ['SUPER_ADMIN','HOD','CLASS_TEACHER'] %}
+  <a href="{{ url_for('timetable.manage') }}" class="btn-erp btn-primary-erp">
+    <i class="fa-solid fa-pen-to-square"></i> Manage Timetable
+  </a>
+  {% endif %}
+</div>
+
+{# ── Class selector (staff only) ──────────────────────────── #}
+{% if current_user.role not in ['STUDENT','CR'] %}
+<div class="card-erp" style="margin-bottom:20px;">
+  <div class="card-body-erp">
+    <form style="display:flex;gap:14px;align-items:flex-end;">
+      <div style="min-width:220px;">
+        <label class="form-label-erp">View Class Timetable</label>
+        <select name="class_id" class="form-control-erp" onchange="this.form.submit()">
+          <option value="">-- Select Class --</option>
+          {% for cls in classes %}
+          <option value="{{ cls.id }}" {{ 'selected' if selected_class and selected_class.id==cls.id }}>
+            {{ cls.name }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+{% if selected_class %}
+<h4 style="margin-bottom:16px;font-size:16px;font-weight:700;">
+  📅 {{ selected_class.name }} — Weekly Schedule
+</h4>
+
+{# ── Mobile Day Tab Switcher (hidden on desktop via CSS) ── #}
+{% if selected_class %}
+<div class="tt-mobile-tabs" id="ttMobileTabs">
+  {% set weekday_names = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'] %}
+  {% for day in days %}
+  <button class="tt-mobile-tab" data-day="{{ day }}" onclick="switchDay('{{ day }}')">
+    {{ day[:3] }}
+  </button>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="card-erp" style="overflow-x:auto;padding:0;">
+  <div class="tt-wrapper" style="min-height:{{ grid_height + 36 }}px;">
+
+    {# ── Time Axis ── #}
+    <div class="tt-axis" style="height:{{ grid_height + 36 }}px;">
+      <div style="height:36px;"></div>{# offset for header #}
+      {% for tick in time_axis %}
+      <span class="tt-axis-label" style="top: {{ tick.top + 36 }}px;">{{ tick.label }}</span>
+      {% endfor %}
+    </div>
+
+    {# ── Day Columns ── #}
+    <div class="tt-days-wrap">
+      {% for day in days %}
+      <div class="tt-day-col" data-dayname="{{ day }}">
+        <div class="tt-day-hdr">{{ day[:3].upper() }}</div>
+
+        <div class="tt-day-body" style="height:{{ grid_height }}px;position:relative;">
+
+          {# Hourly gridlines #}
+          {% for tick in time_axis %}
+          <div class="tt-gridline" style="top:{{ tick.top }}px;"></div>
+          {% endfor %}
+
+          {# Break strips #}
+          {% for brk in breaks %}
+          <div class="tt-break" style="top:{{ brk.top }}px;height:{{ brk.height }}px;">
+            <span class="tt-break-label">{{ brk.label }}</span>
+          </div>
+          {% endfor %}
+
+          {# Class groups #}
+          {% set day_groups = timetable_data.get(day, []) %}
+          {% for group in day_groups %}
+            {# All items in a group share the same top position; use first item's values #}
+            {% set first = group[0] %}
+            <div class="tt-group" style="top:{{ first.top }}px;height:{{ first.height }}px;">
+              {% for item in group %}
+              {% set e = item.entry %}
+              {% set is_mine = current_user.role in ['TEACHER','CLASS_TEACHER','HOD','SUPER_ADMIN'] and e.subject.teacher_id == current_user.id %}
+              <div class="tt-entry {{ e.entry_type or 'theory' }}{{ ' mine' if is_mine }}"
+                   data-day="{{ day }}"
+                   data-start="{{ e.start_time[:5] }}"
+                   data-end="{{ e.end_time[:5] }}"
+                   data-teacher-id="{{ e.subject.teacher_id or '' }}"
+                   title="{{ e.subject.name }}">
+                <div>
+                  <span class="tt-tag {{ e.entry_type or 'theory' }}">
+                    {% if e.entry_type == 'practical' %}🔬 Practical{% else %}📖 Theory{% endif %}
+                  </span>
+                  {% if e.batch %}<span class="tt-tag batch">{{ e.batch }}</span>{% endif %}
+                  {% if is_mine %}
+                  <span class="tt-mine-badge">⭐ Your Class</span>
+                  {% endif %}
+                  {# JS will inject the NOW badge here #}
+                </div>
+                <div class="tt-entry-name">{{ e.subject.name }}</div>
+                <div class="tt-entry-time">
+                  <i class="fa-regular fa-clock" style="font-size:8px;"></i>
+                  {{ format_time_12hr(e.start_time) }} – {{ format_time_12hr(e.end_time) }}
+                </div>
+                {% if e.subject.teacher_user %}
+                <div class="tt-entry-teacher">
+                  <i class="fa-solid fa-chalkboard-user" style="font-size:8px;"></i>
+                  {{ e.subject.teacher_user.name }}
+                </div>
+                {% endif %}
+              </div>
+              {% endfor %}
+            </div>
+          {% else %}
+          {# No entries — show empty placeholder #}
+          {% endfor %}
+
+        </div>{# /tt-day-body #}
+      </div>{# /tt-day-col #}
+      {% endfor %}
+    </div>{# /tt-days-wrap #}
+
+  </div>{# /tt-wrapper #}
+</div>
+
+{% elif not (current_user.role in ['STUDENT','CR']) %}
+<div class="card-erp"><div class="card-body-erp">
+  <div class="empty-state">
+    <div class="empty-icon">📅</div>
+    <h6>Select a Class</h6>
+    <p>Choose a class above to view its timetable.</p>
+  </div>
+</div></div>
+{% else %}
+<div class="card-erp"><div class="card-body-erp">
+  <div class="empty-state">
+    <div class="empty-icon">📅</div>
+    <h6>No Timetable Yet</h6>
+    <p>Your class timetable hasn't been set up yet.</p>
+  </div>
+</div></div>
+{% endif %}
+
+{% block extra_js %}
+<script>
+  // Day names matching the backend DAYS list
+  const DAY_NAMES = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+
+  function highlightCurrentClass() {
+    const now  = new Date();
+    const todayName = DAY_NAMES[now.getDay()];
+    const curMin = now.getHours() * 60 + now.getMinutes();
+
+    document.querySelectorAll('.tt-entry[data-day]').forEach(el => {
+      const day   = el.dataset.day;
+      const start = el.dataset.start;  // "HH:MM"
+      const end   = el.dataset.end;
+
+      const toMin = t => { const [h,m] = t.split(':').map(Number); return h*60+m; };
+      const isToday   = (day === todayName);
+      const isOngoing = (curMin >= toMin(start) && curMin < toMin(end));
+
+      // Remove old badge first
+      const oldBadge = el.querySelector('.tt-now-badge');
+      if (oldBadge) oldBadge.remove();
+
+      if (isToday && isOngoing) {
+        el.classList.add('now');
+        // Inject animated NOW badge next to the type tag
+        const tagRow = el.querySelector('div');
+        if (tagRow) {
+          const badge = document.createElement('span');
+          badge.className = 'tt-now-badge';
+          badge.innerHTML = '<span class="tt-now-dot"></span> NOW';
+          tagRow.appendChild(badge);
+        }
+      } else {
+        el.classList.remove('now');
+      }
+    });
+  }
+
+  // Run immediately and refresh every 60 seconds
+  highlightCurrentClass();
+  setInterval(highlightCurrentClass, 60000);
+
+  // ── Mobile day tab switcher ────────────────────────────────────
+  const WEEKDAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+
+  function switchDay(dayName) {
+    // Toggle columns
+    document.querySelectorAll('.tt-day-col').forEach(col => {
+      col.classList.toggle('mobile-active', col.dataset.dayname === dayName);
+    });
+    // Toggle tab active state
+    document.querySelectorAll('.tt-mobile-tab').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.day === dayName);
+    });
+  }
+
+  function initMobileTabs() {
+    const tabs = document.querySelectorAll('.tt-mobile-tab');
+    if (!tabs.length) return;
+
+    const todayName = DAY_NAMES[new Date().getDay()];
+    const defaultDay = WEEKDAYS.includes(todayName) ? todayName : 'Monday';
+
+    // Mark today's tab green
+    tabs.forEach(btn => {
+      if (btn.dataset.day === todayName) btn.classList.add('today-tab');
+    });
+
+    // On desktop: make all columns visible (CSS will take care of hiding on mobile)
+    if (window.innerWidth > 767) {
+      document.querySelectorAll('.tt-day-col').forEach(col => {
+        col.classList.add('mobile-active'); // no-op on desktop, CSS overrides
+      });
+    }
+
+    // Init: show today's column (or Monday)
+    switchDay(defaultDay);
+
+    // Scroll the active tab into view on mobile
+    const activeTab = document.querySelector(`.tt-mobile-tab[data-day="${defaultDay}"]`);
+    if (activeTab) activeTab.scrollIntoView({ behavior: 'instant', block: 'nearest', inline: 'center' });
+  }
+
+  // Re-run on resize so switching desktop↔mobile keeps state consistent
+  initMobileTabs();
+  window.addEventListener('resize', () => {
+    if (window.innerWidth > 767) {
+      document.querySelectorAll('.tt-day-col').forEach(c => c.classList.add('mobile-active'));
+    }
+  });
+</script>
+{% endblock %}
+{% endblock %}

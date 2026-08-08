@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Post Notice{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title"><div class="title-icon">📢</div> Post Notice</h1>
+</div>
+<div style="max-width:600px;">
+  <div class="card-erp">
+    <div class="card-body-erp">
+      <form method="POST" action="{{ url_for('notices.create') }}" enctype="multipart/form-data" data-validate>
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-group-erp">
+          <label class="form-label-erp">Notice Title *</label>
+          <input type="text" name="title" class="form-control-erp" placeholder="e.g. Exam Schedule Update" required>
+        </div>
+        <div class="form-group-erp">
+          <label class="form-label-erp">Content *</label>
+          <textarea name="content" class="form-control-erp" rows="5" required
+            placeholder="Write the full notice content here..."></textarea>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+          <div class="form-group-erp">
+            <label class="form-label-erp">Target Audience</label>
+            <select name="target_role" class="form-control-erp">
+              {% for val, label in roles %}
+              <option value="{{ val }}">{{ label }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="form-group-erp">
+          <label class="form-label-erp">Target Class</label>
+          <select name="target_class_id" class="form-control-erp" {% if current_user.role == 'CR' %}disabled{% endif %}>
+            {% if current_user.role != 'CR' %}
+              <option value="">All Classes</option>
+            {% endif %}
+            {% for c in classes %}
+            <option value="{{ c.id }}" {% if current_user.role == 'CR' %}selected{% endif %}>{{ c.name }}</option>
+            {% endfor %}
+          </select>
+          {% if current_user.role == 'CR' %}
+          <small style="color:var(--text-muted);"><i class="fa-solid fa-lock"></i> Locked to your class. This notice will require Class Teacher approval.</small>
+          {% endif %}
+        </div>
+        </div>
+        <div class="form-group-erp">
+          <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:14px;color:var(--text-primary);">
+            <input type="checkbox" name="is_urgent" style="accent-color:var(--accent-red);width:16px;height:16px;">
+            🚨 Mark as Urgent Notice
+          </label>
+        </div>
+
+        {# ── File Attachment ── #}
+        <div class="form-group-erp">
+          <label class="form-label-erp">
+            <i class="fa-solid fa-paperclip"></i> Attach File <span style="color:var(--text-muted);font-weight:400;">(optional)</span>
+          </label>
+          <div style="border:2px dashed rgba(99,102,241,0.35);border-radius:var(--radius-sm);padding:16px 14px;
+                      background:rgba(99,102,241,0.04);transition:border-color .2s;"
+               id="attachment-drop-zone"
+               ondragover="this.style.borderColor='var(--accent-purple)'" 
+               ondragleave="this.style.borderColor='rgba(99,102,241,0.35)'">
+            <label for="notice-attachment" style="display:flex;flex-direction:column;align-items:center;gap:8px;cursor:pointer;">
+              <i class="fa-solid fa-cloud-arrow-up" style="font-size:28px;color:rgba(99,102,241,0.6);"></i>
+              <span style="font-size:13px;color:var(--text-secondary);">Click to browse or drag & drop a file</span>
+              <span style="font-size:11px;color:var(--text-muted);">PDF, Word, Excel, PowerPoint, JPG, PNG — max 16 MB</span>
+            </label>
+            <input type="file" id="notice-attachment" name="attachment"
+                   accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.xlsx,.xls,.ppt,.pptx"
+                   style="display:none;"
+                   onchange="document.getElementById('attachment-name').textContent = this.files[0]?.name || '';">
+          </div>
+          <p id="attachment-name" style="margin-top:6px;font-size:12px;color:var(--accent-purple);font-weight:500;"></p>
+        </div>
+        <script>
+          document.getElementById('attachment-drop-zone').addEventListener('click', function(e){
+            if (e.target.tagName !== 'INPUT') document.getElementById('notice-attachment').click();
+          });
+        </script>
+
+        <div style="display:flex;gap:12px;">
+          <button type="submit" class="btn-erp btn-primary-erp">
+            <i class="fa-solid fa-paper-plane"></i> Post Notice
+          </button>
+          <a href="{{ url_for('notices.index') }}" class="btn-erp btn-outline-erp">Cancel</a>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
